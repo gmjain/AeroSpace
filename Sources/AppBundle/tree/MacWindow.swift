@@ -43,9 +43,11 @@ final class MacWindow: Window {
             await tryOnWindowDetected(window)
         }
         // [FORK gmjain/AeroSpace] an intent-placed window is what the user
-        // asked for: focus it, even if churn moved focus meanwhile.
+        // asked for: focus it, even if churn moved focus meanwhile, and guard
+        // it against late same-app activation steals.
         if intent != nil {
             _ = window.focusWindow()
+            armSpawnFocusGuard(windowId)
         }
         return window
     }
