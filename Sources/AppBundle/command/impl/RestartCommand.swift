@@ -17,9 +17,18 @@ struct RestartCommand: Command {
                 return .fail(io.err("Failed to save restart state: \(error)"))
             }
         }
+        // Wait for THIS instance to fully die before relaunching: quitting
+        // un-parks every window via AX and can take seconds, and an `open`
+        // fired while the old instance is still alive is a no-op against the
+        // dying process, stranding the user with no AeroSpace at all.
+        let myPid = ProcessInfo.processInfo.processIdentifier
         let process = Process()
         process.executableURL = URL(filePath: "/bin/bash")
-        process.arguments = ["-c", "sleep 1; open -a AeroSpace"]
+        process.arguments = [
+            "-c",
+            "for i in $(seq 1 150); do kill -0 \(myPid) 2>/dev/null || break; sleep 0.2; done; " +
+                "open -a AeroSpace",
+        ]
         do {
             try process.run()
         } catch {
