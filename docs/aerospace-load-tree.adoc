@@ -1,0 +1,39 @@
+= aerospace-load-tree(1)
+include::util/man-attributes.adoc[]
+// tag::purpose[]
+:manpurpose: [FORK] Rebuild workspace layout trees from a dump-tree JSON document on stdin
+// end::purpose[]
+:manname: aerospace-load-tree
+
+// =========================================================== Synopsis
+== Synopsis
+[verse]
+// tag::synopsis[]
+aerospace load-tree [-h|--help]
+
+// end::synopsis[]
+
+// =========================================================== Description
+== Description
+
+// tag::body[]
+{manpurpose}
+
+Reads JSON produced by xref:dump-tree.adoc[aerospace-dump-tree] from stdin and
+reconstructs each workspace: workspace-to-monitor assignment, the tiling tree
+(pulling windows from other workspaces when needed), the visible workspace per
+monitor, and the focused window. Windows mentioned in the dump that no longer
+exist are skipped; live windows not mentioned are force-retiled onto their
+workspace.
+
+Example: `aerospace dump-tree > tree.json; ...; aerospace load-tree < tree.json`
+
+// =========================================================== Options
+include::util/conditional-options-header.adoc[]
+
+-h, --help:: Print help
+
+// end::body[]
+
+// =========================================================== Footer
+include::util/man-footer.adoc[]

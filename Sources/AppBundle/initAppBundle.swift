@@ -30,6 +30,8 @@ import Foundation
         )
         try await runLightSession(.startup, .forceRun) {
             smartLayoutAtStartup()
+            // [FORK gmjain/AeroSpace] reload layout saved by the restart command
+            await loadRestartStateIfFresh()
             _ = await config.afterStartupCommand.run(.defaultEnv, .emptyStdin)
         }
     }

@@ -19,6 +19,9 @@ let config_help_generated = """
 let debug_windows_help_generated = """
     USAGE: debug-windows [-h|--help] [--window-id <window-id>]
     """
+let dump_tree_help_generated = """
+    USAGE: dump-tree [-h|--help]
+    """
 let echo_help_generated = """
     USAGE: echo [-h|--help] [--stderr] [--window-id <window-id>] -- <string>...
     """
@@ -96,6 +99,9 @@ let list_workspaces_help_generated = """
        OR: list-workspaces [-h|--help] --all [--format <output-format>] [--count] [--json]
        OR: list-workspaces [-h|--help] --focused [--format <output-format>] [--count] [--json]
     """
+let load_tree_help_generated = """
+    USAGE: load-tree [-h|--help]
+    """
 let macos_native_fullscreen_help_generated = """
     USAGE: macos-native-fullscreen [-h|--help] [--window-id <window-id>]
        OR: macos-native-fullscreen [-h|--help] [--window-id <window-id>] [--fail-if-noop] on
@@ -138,6 +144,9 @@ let reload_config_help_generated = """
     """
 let resize_help_generated = """
     USAGE: resize [-h|--help] [--window-id <window-id>] (smart|smart-opposite|width|height) [+|-]<number>
+    """
+let restart_help_generated = """
+    USAGE: restart [-h|--help] [--no-restore]
     """
 let run_callback_help_generated = """
     USAGE: run-callback [-h|--help] [--for-every-window|--window-id <window-id>] on-window-detected
