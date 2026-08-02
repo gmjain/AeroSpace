@@ -7,6 +7,11 @@
     if nativeFocused?.parent is MacosPopupWindowsContainer {
         return
     }
+    // [FORK gmjain/AeroSpace] reject same-app activation steals right after
+    // a spawn-intent placement (see spawnIntent.swift).
+    if rejectStolenNativeFocus(nativeFocused) {
+        return
+    }
     if nativeFocused?.windowId != lastKnownNativeFocusedWindowId {
         _ = nativeFocused?.focusWindow()
         lastKnownNativeFocusedWindowId = nativeFocused?.windowId
