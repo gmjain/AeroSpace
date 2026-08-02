@@ -28,7 +28,9 @@ keep history linear.
 
 ## Active tasks
 
-### 1. User-intent clock: IMPLEMENTED on `user-intent-clock`, needs deploy + validation
+### 1. User-intent clock: DEPLOYED 2026-08-02 14:02 (from `user-intent-clock`), validating
+Deployed from the feature branch before ff-merge; `main` is still at bcb0f6c3. After validation:
+ff-merge `user-intent-clock` → `main` (no rebuild needed if no new commits).
 Decision gate resolved 2026-08-02: session-event discrimination is **not viable**. Log evidence
 (user reproduced a bounce loop by closing WezTerm on ws10 and switching to ws4): Chrome@ws10
 steals arrived in sessions tagged `hotkeyBinding` and `ax(AXMoved)`, not just bare
@@ -63,10 +65,18 @@ open design question in the PR: internal-focus vs native-focus desync (upstream 
 `window != focus.windowOrNil || nativeFocusedWindow != window` semantics). If it lands, drop the
 commit from the patch queue on the next rebase.
 
-### 4. Consider upstreaming dump-tree / load-tree
-Upstream #2173 (restore arrangement on monitor reconnect) and #57 (persist assignments) are
-circling layout persistence. Our treeDump.swift is close to PR-able; restart command is
-fork-flavored and probably stays ours.
+### 4. Consider upstreaming dump-tree / load-tree — plan changed 2026-08-02
+Per the upstream PR sweep ([upstream-prs.md](upstream-prs.md)): don't open a competing PR.
+Upstream #1958 already occupies the i3-parity get-tree/append-layout slot in near-mergeable
+shape; maintainer's only signal is "i3 is the reference". Cheaper: comment on #1958/#1957
+offering our weights/round-trip/whole-world experience. restart command stays fork-only.
+
+### 4b. BACKBURNER: upstream PR adoptions ([upstream-prs.md](upstream-prs.md))
+Sweep of 9 open upstream PRs done 2026-08-02; nothing applied. When picked up, priority order:
+cherry-pick #2208 (refresh-echo suppression — starves the AXMoved churn behind the bounce loop),
+cherry-pick #2179 (SkyLight window-level focus — fixes app-level `activate` keying the wrong
+window in every push-back path), then load-tree steals (bundle-id fallback, floating-restore
+gap fix, closedWindowsCache seeding). Details + revisit-conditions in the doc.
 
 ### 5. Punted config polish (from earlier sessions)
 - Service-mode additions: `b = ['balance-sizes', 'mode main']`, `e = ['enable toggle', 'mode main']`.
