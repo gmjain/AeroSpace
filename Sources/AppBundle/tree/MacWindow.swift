@@ -226,6 +226,36 @@ private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, w
     window?.unbindFromParent() // It's important to unbind to get correct data from below
     let mruWindow = workspace.mostRecentWindowRecursive
     if let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer {
+        // [FORK gmjain/AeroSpace] auto-split-by-aspect: split the MRU window
+        // along its long edge instead of inserting into its parent as-is.
+        if config.autoSplitByAspect, tilingParent.layout == .tiles,
+           let rect = mruWindow.lastAppliedLayoutPhysicalRect {
+            let desired: Orientation = rect.width >= rect.height ? .h : .v
+            if desired != tilingParent.orientation {
+                if tilingParent.children.count == 1 {
+                    // MRU window is alone: just flip its container.
+                    tilingParent.changeOrientation(desired)
+                } else {
+                    // Wrap the MRU window in a container of the desired
+                    // orientation and insert the new window next to it there
+                    // (same mechanics as join-with).
+                    let prevBinding = mruWindow.unbindFromParent()
+                    let newParent = TilingContainer(
+                        parent: tilingParent,
+                        adaptiveWeight: prevBinding.adaptiveWeight,
+                        desired,
+                        .tiles,
+                        index: prevBinding.index,
+                    )
+                    mruWindow.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
+                    return BindingData(
+                        parent: newParent,
+                        adaptiveWeight: WEIGHT_AUTO,
+                        index: INDEX_BIND_LAST,
+                    )
+                }
+            }
+        }
         return BindingData(
             parent: tilingParent,
             adaptiveWeight: WEIGHT_AUTO,

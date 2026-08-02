@@ -38,6 +38,9 @@ struct Config: ConvenienceMutable {
     var afterStartupCommand: Shell<any Command> = .empty
     var _indentForNestedContainersWithTheSameOrientation: Void = ()
     var enableNormalizationFlattenContainers: Bool = true
+    // [FORK gmjain/AeroSpace] new windows split the MRU window along its long
+    // edge (wide -> side by side, tall -> stacked), i3-manual-split style
+    var autoSplitByAspect: Bool = false
     var _nonEmptyWorkspacesRootContainersLayoutOnStartup: Void = ()
     var defaultRootContainerLayout: Layout = .tiles
     var defaultRootContainerOrientation: DefaultContainerOrientation = .auto
