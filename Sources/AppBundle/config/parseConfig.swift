@@ -141,6 +141,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "spawn-intent-apps": Parser(\.spawnIntentApps, parseArrayOfStrings), // [FORK gmjain/AeroSpace]
     "spawn-intent-timeout-ms": Parser(\.spawnIntentTimeoutMs, parseInt), // [FORK gmjain/AeroSpace]
     "fork-debug-log": Parser(\.forkDebugLog, parseBool), // [FORK gmjain/AeroSpace]
+    "focus-steal-guard-apps": Parser(\.focusStealGuardApps, parseArrayOfStrings), // [FORK gmjain/AeroSpace]
     "enable-normalization-opposite-orientation-for-nested-containers": Parser(\.enableNormalizationOppositeOrientationForNestedContainers, parseBool),
 
     "default-root-container-layout": Parser(\.defaultRootContainerLayout, parseLayout),

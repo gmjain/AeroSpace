@@ -47,6 +47,11 @@ struct Config: ConvenienceMutable {
     var spawnIntentTimeoutMs: Int = 5000
     // [FORK gmjain/AeroSpace] focus/workspace tracing to fork-debug.log
     var forkDebugLog: Bool = false
+    // [FORK gmjain/AeroSpace] apps whose native focus events are ignored when
+    // they point at a window on a non-visible workspace (multi-instance apps
+    // like WezTerm self-activate in the background and silently flip the
+    // active workspace)
+    var focusStealGuardApps: [String] = []
     var _nonEmptyWorkspacesRootContainersLayoutOnStartup: Void = ()
     var defaultRootContainerLayout: Layout = .tiles
     var defaultRootContainerOrientation: DefaultContainerOrientation = .auto
