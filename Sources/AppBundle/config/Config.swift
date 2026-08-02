@@ -41,6 +41,10 @@ struct Config: ConvenienceMutable {
     // [FORK gmjain/AeroSpace] new windows split the MRU window along its long
     // edge (wide -> side by side, tall -> stacked), i3-manual-split style
     var autoSplitByAspect: Bool = false
+    // [FORK gmjain/AeroSpace] spawn-intent: new windows of these apps appear
+    // where the user was after their last keybinding (see spawnIntent.swift)
+    var spawnIntentApps: [String] = []
+    var spawnIntentTimeoutMs: Int = 5000
     var _nonEmptyWorkspacesRootContainersLayoutOnStartup: Void = ()
     var defaultRootContainerLayout: Layout = .tiles
     var defaultRootContainerOrientation: DefaultContainerOrientation = .auto

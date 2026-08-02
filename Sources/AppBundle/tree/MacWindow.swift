@@ -19,13 +19,17 @@ final class MacWindow: Window {
     static func getOrRegister(windowId: UInt32, macApp: MacApp) async throws -> MacWindow {
         if let existing = allWindowsMap[windowId] { return existing }
         let rect = try await macApp.getAxRect(windowId, .cancellable)
+        // [FORK gmjain/AeroSpace] spawn-intent: place the window where the
+        // user was after their last keybinding, immune to focus churn.
+        let intent = isStartup ? nil : consumeSpawnIntent(for: macApp)
         let data = try await unbindAndGetBindingDataForNewWindow(
             windowId,
             macApp,
             isStartup
                 ? (rect?.center.monitorApproximation ?? mainMonitor).activeWorkspace
-                : focus.workspace,
+                : intent.map { Workspace.get(byName: $0.workspaceName) } ?? focus.workspace,
             window: nil,
+            anchor: intent?.windowId.flatMap { Window.get(byId: $0) },
             .cancellable,
         )
 
@@ -37,6 +41,11 @@ final class MacWindow: Window {
         try await debugWindowsIfRecording(window, .cancellable)
         if try await !restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: window) {
             await tryOnWindowDetected(window)
+        }
+        // [FORK gmjain/AeroSpace] an intent-placed window is what the user
+        // asked for: focus it, even if churn moved focus meanwhile.
+        if intent != nil {
+            _ = window.focusWindow()
         }
         return window
     }
@@ -204,27 +213,32 @@ extension Window {
     func relayoutWindow(on workspace: Workspace, _ cm: CancellationMode, forceTile: Bool = false) async throws {
         let data = forceTile
             ? unbindAndGetBindingDataForNewTilingWindow(workspace, window: self)
-            : try await unbindAndGetBindingDataForNewWindow(self.asMacWindow().windowId, self.asMacWindow().macApp, workspace, window: self, cm)
+            : try await unbindAndGetBindingDataForNewWindow(self.asMacWindow().windowId, self.asMacWindow().macApp, workspace, window: self, anchor: nil, cm)
         bind(to: data.parent, adaptiveWeight: data.adaptiveWeight, index: data.index)
     }
 }
 
 // The function is private because it's unsafe. It leaves the window in unbound state
 @MainActor
-private func unbindAndGetBindingDataForNewWindow(_ windowId: UInt32, _ macApp: MacApp, _ workspace: Workspace, window: Window?, _ cm: CancellationMode) async throws -> BindingData {
+private func unbindAndGetBindingDataForNewWindow(_ windowId: UInt32, _ macApp: MacApp, _ workspace: Workspace, window: Window?, anchor: Window? = nil, _ cm: CancellationMode) async throws -> BindingData {
     let windowLevel = getWindowLevel(for: windowId)
     return switch try await macApp.getAxUiElementWindowType(windowId, windowLevel, cm) {
         case .popup: BindingData(parent: macosPopupWindowsContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
         case .dialog: BindingData(parent: workspace.floatingWindowsContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
-        case .window: unbindAndGetBindingDataForNewTilingWindow(workspace, window: window)
+        case .window: unbindAndGetBindingDataForNewTilingWindow(workspace, window: window, anchor: anchor)
     }
 }
 
 // The function is private because it's unsafe. It leaves the window in unbound state
 @MainActor
-private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: Window?) -> BindingData {
+private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: Window?, anchor: Window? = nil) -> BindingData {
     window?.unbindFromParent() // It's important to unbind to get correct data from below
-    let mruWindow = workspace.mostRecentWindowRecursive
+    // [FORK gmjain/AeroSpace] spawn-intent anchor beats the MRU window when
+    // it is a live tiling window on this workspace.
+    var mruWindow = workspace.mostRecentWindowRecursive
+    if let anchor, anchor.nodeWorkspace == workspace, anchor.parent is TilingContainer {
+        mruWindow = anchor
+    }
     if let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer {
         // [FORK gmjain/AeroSpace] auto-split-by-aspect: split the MRU window
         // along its long edge instead of inserting into its parent as-is.

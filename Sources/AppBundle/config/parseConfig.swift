@@ -138,6 +138,8 @@ private let configParser: [String: any ParserProtocol<Config>] = [
 
     "enable-normalization-flatten-containers": Parser(\.enableNormalizationFlattenContainers, parseBool),
     "auto-split-by-aspect": Parser(\.autoSplitByAspect, parseBool), // [FORK gmjain/AeroSpace]
+    "spawn-intent-apps": Parser(\.spawnIntentApps, parseArrayOfStrings), // [FORK gmjain/AeroSpace]
+    "spawn-intent-timeout-ms": Parser(\.spawnIntentTimeoutMs, parseInt), // [FORK gmjain/AeroSpace]
     "enable-normalization-opposite-orientation-for-nested-containers": Parser(\.enableNormalizationOppositeOrientationForNestedContainers, parseBool),
 
     "default-root-container-layout": Parser(\.defaultRootContainerLayout, parseLayout),
