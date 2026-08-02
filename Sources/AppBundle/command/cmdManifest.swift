@@ -18,6 +18,8 @@ extension CmdArgs {
                 command = ConfigCommand(args: self as! ConfigCmdArgs)
             case .debugWindows:
                 command = DebugWindowsCommand(args: self as! DebugWindowsCmdArgs)
+            case .dumpTree:
+                command = DumpTreeCommand(args: self as! DumpTreeCmdArgs)
             case .echo:
                 command = EchoCommand(args: self as! EchoCmdArgs)
             case .enable:
@@ -52,6 +54,8 @@ extension CmdArgs {
                 command = ListWindowsCommand(args: self as! ListWindowsCmdArgs)
             case .listWorkspaces:
                 command = ListWorkspacesCommand(args: self as! ListWorkspacesCmdArgs)
+            case .loadTree:
+                command = LoadTreeCommand(args: self as! LoadTreeCmdArgs)
             case .macosNativeFullscreen:
                 command = MacosNativeFullscreenCommand(args: self as! MacosNativeFullscreenCmdArgs)
             case .macosNativeMinimize:
@@ -72,6 +76,8 @@ extension CmdArgs {
                 command = ReloadConfigCommand(args: self as! ReloadConfigCmdArgs)
             case .resize:
                 command = ResizeCommand(args: self as! ResizeCmdArgs)
+            case .restart:
+                command = RestartCommand(args: self as! RestartCmdArgs)
             case .runCallback:
                 command = RunCallbackCommand(args: self as! RunCallbackCmdArgs)
             case .split:

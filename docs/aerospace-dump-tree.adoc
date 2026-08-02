@@ -1,0 +1,36 @@
+= aerospace-dump-tree(1)
+include::util/man-attributes.adoc[]
+// tag::purpose[]
+:manpurpose: [FORK] Dump all workspace layout trees as JSON
+// end::purpose[]
+:manname: aerospace-dump-tree
+
+// =========================================================== Synopsis
+== Synopsis
+[verse]
+// tag::synopsis[]
+aerospace dump-tree [-h|--help]
+
+// end::synopsis[]
+
+// =========================================================== Description
+== Description
+
+// tag::body[]
+{manpurpose}
+
+Prints a JSON document describing every workspace: its monitor, visibility,
+focus, the full tiling tree (containers with orientation, layout and weights;
+windows with ids), and floating windows. The output is accepted by
+xref:load-tree.adoc[aerospace-load-tree] and is written automatically by
+xref:restart.adoc[aerospace-restart].
+
+// =========================================================== Options
+include::util/conditional-options-header.adoc[]
+
+-h, --help:: Print help
+
+// end::body[]
+
+// =========================================================== Footer
+include::util/man-footer.adoc[]

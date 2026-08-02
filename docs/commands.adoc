@@ -40,6 +40,13 @@ include::aerospace-debug-windows.adoc[tags=synopsis]
 include::aerospace-debug-windows.adoc[tags=purpose]
 include::aerospace-debug-windows.adoc[tags=body]
 
+== dump-tree
+----
+include::aerospace-dump-tree.adoc[tags=synopsis]
+----
+include::aerospace-dump-tree.adoc[tags=purpose]
+include::aerospace-dump-tree.adoc[tags=body]
+
 == echo
 ----
 include::aerospace-echo.adoc[tags=synopsis]
@@ -167,6 +174,13 @@ include::aerospace-list-workspaces.adoc[tags=synopsis]
 include::aerospace-list-workspaces.adoc[tags=purpose]
 include::aerospace-list-workspaces.adoc[tags=body]
 
+== load-tree
+----
+include::aerospace-load-tree.adoc[tags=synopsis]
+----
+include::aerospace-load-tree.adoc[tags=purpose]
+include::aerospace-load-tree.adoc[tags=body]
+
 == macos-native-fullscreen
 ----
 include::aerospace-macos-native-fullscreen.adoc[tags=synopsis]
@@ -237,6 +251,13 @@ include::aerospace-resize.adoc[tags=synopsis]
 ----
 include::aerospace-resize.adoc[tags=purpose]
 include::aerospace-resize.adoc[tags=body]
+
+== restart
+----
+include::aerospace-restart.adoc[tags=synopsis]
+----
+include::aerospace-restart.adoc[tags=purpose]
+include::aerospace-restart.adoc[tags=body]
 
 == run-callback
 ----

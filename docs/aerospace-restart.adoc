@@ -1,0 +1,38 @@
+= aerospace-restart(1)
+include::util/man-attributes.adoc[]
+// tag::purpose[]
+:manpurpose: [FORK] Restart AeroSpace.app, preserving workspaces and layout trees
+// end::purpose[]
+:manname: aerospace-restart
+
+// =========================================================== Synopsis
+== Synopsis
+[verse]
+// tag::synopsis[]
+aerospace restart [-h|--help] [--no-restore]
+
+// end::synopsis[]
+
+// =========================================================== Description
+== Description
+
+// tag::body[]
+{manpurpose}
+
+Saves the full layout state (see xref:dump-tree.adoc[aerospace-dump-tree]) to
+`~/.local/state/aerospace/restart-tree.json`, relaunches AeroSpace.app, and
+reloads the state automatically during the next startup. Workspaces, layout
+trees, weights, visible workspaces, and the focused window survive the
+restart.
+
+// =========================================================== Options
+include::util/conditional-options-header.adoc[]
+
+-h, --help:: Print help
+
+--no-restore:: Restart without saving/reloading the layout state
+
+// end::body[]
+
+// =========================================================== Footer
+include::util/man-footer.adoc[]
