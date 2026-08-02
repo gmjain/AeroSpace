@@ -128,7 +128,13 @@ extension Monitor {
 
     @MainActor
     func setActiveWorkspace(_ workspace: Workspace) -> Bool {
-        rect.topLeftCorner.setActiveWorkspace(workspace)
+        // [FORK gmjain/AeroSpace]
+        if activeWorkspace != workspace {
+            forkDebugLog("setActiveWorkspace: monitor \(monitorId_oneBased?.description ?? "?") "
+                + "\(activeWorkspace.name) -> \(workspace.name) "
+                + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
+        }
+        return rect.topLeftCorner.setActiveWorkspace(workspace)
     }
 }
 

@@ -45,6 +45,8 @@ struct Config: ConvenienceMutable {
     // where the user was after their last keybinding (see spawnIntent.swift)
     var spawnIntentApps: [String] = []
     var spawnIntentTimeoutMs: Int = 5000
+    // [FORK gmjain/AeroSpace] focus/workspace tracing to fork-debug.log
+    var forkDebugLog: Bool = false
     var _nonEmptyWorkspacesRootContainersLayoutOnStartup: Void = ()
     var defaultRootContainerLayout: Layout = .tiles
     var defaultRootContainerOrientation: DefaultContainerOrientation = .auto

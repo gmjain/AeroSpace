@@ -1,3 +1,5 @@
+import Common
+
 @MainActor private var lastKnownNativeFocusedWindowId: UInt32? = nil
 
 /// The data should flow (from nativeFocused to focused) and
@@ -13,6 +15,13 @@
         return
     }
     if nativeFocused?.windowId != lastKnownNativeFocusedWindowId {
+        // [FORK gmjain/AeroSpace] the moment macOS-side focus changes get
+        // accepted — the usual culprit when workspaces flip "by themselves".
+        if let nativeFocused, nativeFocused.nodeWorkspace != focus.workspace {
+            forkDebugLog("updateFocusCache: native focus \(forkDebugDescribe(nativeFocused)) "
+                + "pulls focus away from ws \(focus.workspace.name) "
+                + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
+        }
         _ = nativeFocused?.focusWindow()
         lastKnownNativeFocusedWindowId = nativeFocused?.windowId
     }
