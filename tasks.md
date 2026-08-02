@@ -28,9 +28,17 @@ keep history linear.
 
 ## Active tasks
 
-### 1. User-intent clock: DEPLOYED 2026-08-02 14:02 (from `user-intent-clock`), validating
-Deployed from the feature branch before ff-merge; `main` is still at bcb0f6c3. After validation:
-ff-merge `user-intent-clock` → `main` (no rebuild needed if no new commits).
+### 1. User-intent clock: DEPLOYED 2026-08-02 14:52 as fork.8, validating
+Correction: the 14:02 deploy was actually fork.7 (allowlist guard, commit 647476a5) — the
+binary's embedded git hash proved the intent clock had never shipped; the "close WezTerm,
+switch fast, get bounced back" repro at 14:37 ran against fork.7 and was the allowlist missing
+Chrome, not an intent-clock bug. fork.8 (ea0d71bd) = intent clock + close-invalidation (a
+window close invalidates older intents, so machine refocus after cmd-w/close-click can't ride
+the close's own keystroke). Deployed from the feature branch before ff-merge; `main` is still
+at bcb0f6c3. After validation: ff-merge `user-intent-clock` → `main`.
+Queued, ships next deploy: RestartCommand relaunches `/Applications/AeroSpace.app` by absolute
+path (`open -a` picked the xcode build-products copy by LaunchServices whim; worked around
+live by deleting the build-dir app before restarting).
 Decision gate resolved 2026-08-02: session-event discrimination is **not viable**. Log evidence
 (user reproduced a bounce loop by closing WezTerm on ws10 and switching to ws4): Chrome@ws10
 steals arrived in sessions tagged `hotkeyBinding` and `ax(AXMoved)`, not just bare

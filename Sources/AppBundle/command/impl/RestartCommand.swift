@@ -26,8 +26,13 @@ struct RestartCommand: Command {
         process.executableURL = URL(filePath: "/bin/bash")
         process.arguments = [
             "-c",
+            // Absolute path, not `open -a AeroSpace`: LaunchServices resolves
+            // the name to whichever registered copy it prefers — observed
+            // 2026-08-02 relaunching the xcode build-products copy, leaving
+            // the live server's backing binary exposed to the next build.
+            // /Applications is this fork's only deploy target (tasks.md).
             "for i in $(seq 1 150); do kill -0 \(myPid) 2>/dev/null || break; sleep 0.2; done; " +
-                "open -a AeroSpace",
+                "open '/Applications/AeroSpace.app'",
         ]
         do {
             try process.run()
