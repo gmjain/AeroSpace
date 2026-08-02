@@ -15,17 +15,23 @@ import Common
         return
     }
     if nativeFocused?.windowId != lastKnownNativeFocusedWindowId {
-        // [FORK gmjain/AeroSpace] reject background self-activation of listed
-        // apps: native focus pointing at a window on a NON-visible workspace
-        // that the user cannot have interacted with. Push macOS back so
-        // keystrokes keep going to the real focused window.
+        // [FORK gmjain/AeroSpace] user-intent steal guard (userIntent.swift):
+        // native focus pointing at a window on a NON-visible workspace is
+        // accepted only as the direct consequence of a deliberate activation
+        // (cmd-tab, Dock click). Everything else — background self-activation,
+        // AXMoved churn from the workspace the user just left — is rejected
+        // and macOS is pushed back so keystrokes keep going to the real
+        // focused window.
         if let nativeFocused,
-           config.focusStealGuardApps.contains(nativeFocused.app.rawAppBundleId ?? ""),
            let targetWs = nativeFocused.nodeWorkspace, !targetWs.isVisible {
-            forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(nativeFocused)) "
-                + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
-            focus.windowOrNil?.nativeFocus()
-            return
+            if !hiddenWsFocusPermittedByUserIntent() {
+                forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(nativeFocused)) "
+                    + "(intent: \(describeUserIntent()), session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
+                focus.windowOrNil?.nativeFocus()
+                return
+            }
+            forkDebugLog("updateFocusCache: ACCEPTED hidden-ws focus \(forkDebugDescribe(nativeFocused)) "
+                + "(intent: \(describeUserIntent()), session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
         }
         // [FORK gmjain/AeroSpace] the moment macOS-side focus changes get
         // accepted — the usual culprit when workspaces flip "by themselves".

@@ -28,25 +28,29 @@ keep history linear.
 
 ## Active tasks
 
-### 1. Replace app allowlists with a global "user-intent clock" (NEXT UP)
-`spawn-intent-apps` and `focus-steal-guard-apps` both special-case WezTerm; the user dislikes the
-special-casing. Both approximate one concept: *did the user deliberately act just now?*
+### 1. User-intent clock: IMPLEMENTED on `user-intent-clock`, needs deploy + validation
+Decision gate resolved 2026-08-02: session-event discrimination is **not viable**. Log evidence
+(user reproduced a bounce loop by closing WezTerm on ws10 and switching to ws4): Chrome@ws10
+steals arrived in sessions tagged `hotkeyBinding` and `ax(AXMoved)`, not just bare
+`ax(AXFocusedWindowChanged)` — session tags reflect the active refresh session, so steals ride
+legit sessions. Also confirmed the allowlist misses non-listed apps (Chrome). Built the intent
+clock (`userIntent.swift`, FORK.md feature #7), with one data-driven refinement: hotkey bindings
+do NOT open the 1s hidden-ws acceptance window (the Chrome steal landed 70ms after a `workspace 4`
+binding); only mouse-down / cmd-keystroke (incl. flagsChanged, for cmd-tab swallowed by the app
+switcher) do.
 
-Design (agreed direction, not yet green-lit):
-- Track last deliberate user action in-process: any hotkey binding (already hooked in
-  `HotkeyBinding.swift`), global mouse-down, cmd-modified keystroke (covers cmd-tab; Dock is a
-  click). Same NSEvent global-monitor mechanism FFM already uses.
-- spawn-intent goes global (drop `spawn-intent-apps`): every new tiling window anchors to the
-  focus context of the last deliberate action. Typing and FFM hovers don't move the anchor.
-- steal-guard goes global (drop `focus-steal-guard-apps`): native focus onto a hidden-workspace
-  window is accepted only within ~1s of a deliberate action; otherwise rejected + pushed back.
-- **Decision gate first**: check `grep REJECTED ~/.local/state/aerospace/fork-debug.log` after a
-  week of use. If rejected steals are always `session: ax(AXFocusedWindowChanged)` and legit
-  activations arrive as didActivateApplication sessions, discriminate on session event alone —
-  no input monitors, no heuristics. Otherwise build the intent clock.
-- Acceptance: both allowlist keys deleted from config; cmd-tab/Dock-click to hidden-workspace
-  apps still switches workspaces; no wrong-workspace alt-l landings; no focus steals after
-  alt-enter.
+Remaining:
+- Deploy (recipe in FORK.md; coordinate — restarts the live WM).
+- Validate via fork-debug.log: legit cmd-tab/Dock-click to hidden-ws apps must show ACCEPTED with
+  a fresh intent (if they show `intent: none`, the global monitors miss those events); no
+  ACCEPTED steals inside the 1s coincidence window; no wrong-workspace alt-l landings; alt-enter
+  spawn placement + focus still right.
+- Then delete `spawn-intent-apps` + `focus-steal-guard-apps` from aerospace.toml (AFTER deploy;
+  keys are parsed-but-ignored for auto-reload ordering), and later drop the stubs from
+  Config.swift/parseConfig.swift.
+- Watch-outs (accepted risks, tune if they bite): every first window within 5s of any deliberate
+  action now grabs focus (was: listed apps only); a background window appearing within 5s of a
+  click gets yanked to the current workspace.
 
 ### 2. Confirm the ws4 steal is dead, then disable fork-debug-log
 `fork-debug-log = true` is live to observe the steal guard. After a few clean days: flip to

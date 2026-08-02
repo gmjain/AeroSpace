@@ -40,8 +40,8 @@ extension HotKey {
                         _ = await config.modes[activeMode]?.bindings[binding.descriptionWithKeyCode]?.commands
                             .run(.defaultEnv, .emptyStdin)
                         // [FORK gmjain/AeroSpace] the user's focus after a
-                        // deliberate keypress is the spawn anchor
-                        recordSpawnIntent()
+                        // deliberate keypress is the intent anchor
+                        recordUserIntent(.hotkeyBinding)
                     }
                 }
             }

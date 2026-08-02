@@ -19,6 +19,7 @@ import Foundation
 
         startUnixSocketServer()
         GlobalObserver.initObserver()
+        initUserIntentMonitors() // [FORK gmjain/AeroSpace] user-intent clock
         Workspace.garbageCollectUnusedWorkspaces() // init workspaces
         _ = Workspace.all.first?.focusWorkspace()
         await runHeavyCompleteRefreshSession(

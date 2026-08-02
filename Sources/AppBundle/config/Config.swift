@@ -41,16 +41,19 @@ struct Config: ConvenienceMutable {
     // [FORK gmjain/AeroSpace] new windows split the MRU window along its long
     // edge (wide -> side by side, tall -> stacked), i3-manual-split style
     var autoSplitByAspect: Bool = false
-    // [FORK gmjain/AeroSpace] spawn-intent: new windows of these apps appear
-    // where the user was after their last keybinding (see spawnIntent.swift)
+    // [FORK gmjain/AeroSpace] DEPRECATED, ignored: superseded by the global
+    // user-intent clock (userIntent.swift). Kept parseable so the live config
+    // can drop the key AFTER the new binary is deployed (auto-reload ordering);
+    // remove the field + parser entry on a later cleanup.
     var spawnIntentApps: [String] = []
+    // [FORK gmjain/AeroSpace] freshness window of the user-intent clock for
+    // new-window placement (see userIntent.swift)
     var spawnIntentTimeoutMs: Int = 5000
     // [FORK gmjain/AeroSpace] focus/workspace tracing to fork-debug.log
     var forkDebugLog: Bool = false
-    // [FORK gmjain/AeroSpace] apps whose native focus events are ignored when
-    // they point at a window on a non-visible workspace (multi-instance apps
-    // like WezTerm self-activate in the background and silently flip the
-    // active workspace)
+    // [FORK gmjain/AeroSpace] DEPRECATED, ignored: the hidden-workspace steal
+    // guard is now global and gated on the user-intent clock (userIntent.swift,
+    // focusCache.swift). Kept parseable for auto-reload ordering; remove later.
     var focusStealGuardApps: [String] = []
     var _nonEmptyWorkspacesRootContainersLayoutOnStartup: Void = ()
     var defaultRootContainerLayout: Layout = .tiles

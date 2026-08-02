@@ -19,9 +19,9 @@ final class MacWindow: Window {
     static func getOrRegister(windowId: UInt32, macApp: MacApp) async throws -> MacWindow {
         if let existing = allWindowsMap[windowId] { return existing }
         let rect = try await macApp.getAxRect(windowId, .cancellable)
-        // [FORK gmjain/AeroSpace] spawn-intent: place the window where the
-        // user was after their last keybinding, immune to focus churn.
-        let intent = isStartup ? nil : consumeSpawnIntent(for: macApp)
+        // [FORK gmjain/AeroSpace] user-intent clock: place the window where
+        // the user last deliberately was, immune to focus churn.
+        let intent = isStartup ? nil : consumeSpawnAnchor()
         let data = try await unbindAndGetBindingDataForNewWindow(
             windowId,
             macApp,
@@ -42,12 +42,17 @@ final class MacWindow: Window {
         if try await !restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: window) {
             await tryOnWindowDetected(window)
         }
-        // [FORK gmjain/AeroSpace] an intent-placed window is what the user
-        // asked for: focus it, even if churn moved focus meanwhile, and guard
-        // it against late same-app activation steals.
-        if intent != nil {
-            _ = window.focusWindow()
-            armSpawnFocusGuard(windowId)
+        // [FORK gmjain/AeroSpace] the first window after a deliberate action
+        // is what the user asked for: focus it, even if churn moved focus
+        // meanwhile, and guard it against late same-app activation steals.
+        // Later windows within the intent timeout only inherit placement.
+        if let intent {
+            forkDebugLog("getOrRegister: spawn-anchored \(forkDebugDescribe(window)) "
+                + "-> ws \(intent.workspaceName) grab=\(intent.grabFocus) (intent: \(describeUserIntent()))")
+            if intent.grabFocus {
+                _ = window.focusWindow()
+                armSpawnFocusGuard(windowId)
+            }
         }
         return window
     }

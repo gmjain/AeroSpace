@@ -65,7 +65,23 @@ a **non-visible** workspace is rejected and macOS is pushed back. Safe because g
 interactions (click/FFM) always target visible windows. Known cost: cmd-tab to a hidden listed
 app snaps back.
 
-### 7. fork-debug-log (config)
+### 7. user-intent clock (supersedes the #5/#6 app allowlists)
+`Sources/AppBundle/userIntent.swift` + hooks in `HotkeyBinding.swift`, `focus.swift`,
+`focusCache.swift`, `MacWindow.swift`, `initAppBundle.swift`.
+One in-process record of the last deliberate user action (hotkey binding, global mouse-down,
+cmd-keystroke/flagsChanged via NSEvent global monitors) and its focus context. Focus changes
+within 1s of an action re-anchor it (a click's own focus effect, exec-and-forget scripts calling
+the CLI). Placement: every new window within `spawn-intent-timeout-ms` of an action anchors to
+the intent context; the first one also grabs focus + arms the spawn focus guard. Steal guard:
+native focus onto a hidden workspace is accepted only within 1s of a mouse-down/cmd-keystroke —
+**never merely a hotkey binding**, because 2026-08-02 log data showed steals riding hotkeyBinding
+and ax(AXMoved) sessions (Chrome@hidden-ws bounce loop after closing a window there). That data
+also killed the session-event-discrimination alternative: rejected steals were not confined to
+bare AXFocusedWindowChanged sessions. `spawn-intent-apps` / `focus-steal-guard-apps` are now
+parsed-but-ignored (kept for config auto-reload ordering; drop keys from config after deploy,
+then remove the stubs).
+
+### 8. fork-debug-log (config)
 `Sources/AppBundle/forkDebugLog.swift`. Opt-in tracing to
 `~/.local/state/aerospace/fork-debug.log`: every monitor active-workspace change and every native
 focus acceptance/rejection, tagged with the refresh session event. This is how #6's root cause
@@ -118,14 +134,11 @@ Gotchas (all learned in production):
 
 ## Open items
 
-- **Generalize the two app allowlists** (spawn-intent-apps, focus-steal-guard-apps) into a single
-  global "user-intent clock": track the last deliberate user action (hotkey binding, global
-  mouse-down, cmd-modified keystroke) in-process; spawn placement anchors to it, and native focus
-  changes onto hidden workspaces are accepted only within ~1s of one. Removes app special-casing;
-  costs global keyDown/mouseDown monitors and small coincidence windows. fork-debug-log data
-  (session tags on REJECTED lines) will show whether session-event discrimination
-  (didActivateApplication vs bare AXFocusedWindowChanged) is reliable enough to skip the input
-  monitors entirely.
+- **Validate the user-intent clock in daily use** (feature #7, deployed from `user-intent-clock`
+  branch): watch fork-debug.log for wrong REJECTED lines (legit cmd-tab/Dock activations showing
+  `intent: none` — would mean the global monitors miss those events) and wrong ACCEPTED lines
+  (steals landing inside the 1s coincidence window). Then delete both allowlist keys from
+  aerospace.toml and later remove the parsed-but-ignored stubs.
 - Upstream PR for #1 (FFM re-raise guard), referencing discussion #2177.
 - Possibly upstream dump-tree/load-tree (#2173 and #57 are circling layout persistence).
 - Disable fork-debug-log once the alt-l/ws4 steal is confirmed dead in daily use.

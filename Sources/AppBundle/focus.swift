@@ -72,6 +72,9 @@ private struct FrozenFocus: AeroAny, Equatable, Sendable {
     let status = newFocus.workspace.workspaceMonitor.setActiveWorkspace(newFocus.workspace)
 
     newFocus.windowOrNil?.markAsMostRecentChild()
+    // [FORK gmjain/AeroSpace] focus changes right after a deliberate user
+    // action are its consequence — keep the intent anchor on them
+    refreshUserIntentAnchor()
     return status
 }
 extension Window {
