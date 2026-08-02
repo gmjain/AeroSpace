@@ -98,6 +98,11 @@ final class MacWindow: Window {
         }
         if !skipClosedWindowsCache { cacheClosedWindowIfNeeded() }
         let parent = unbindFromParent().parent
+        // [FORK gmjain/AeroSpace] user-intent clock: the machine refocus that
+        // follows a close must not ride the close's own keystroke/click
+        // (userIntent.swift). Popups are excluded — they die on every menu
+        // interaction and would invalidate genuinely fresh intents.
+        if !(parent is MacosPopupWindowsContainer) { recordWindowRemoval() }
         let deadWindowWorkspace = parent.nodeWorkspace
         let focus = focus
         if let deadWindowWorkspace, deadWindowWorkspace == focus.workspace ||

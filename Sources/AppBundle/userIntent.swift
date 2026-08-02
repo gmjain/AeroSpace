@@ -28,6 +28,7 @@ struct UserIntent {
 
 @MainActor private(set) var lastUserIntent: UserIntent? = nil
 @MainActor private var spawnFocusGrabPending = false
+@MainActor private var lastWindowRemovalAt: Date? = nil
 
 /// Native focus onto a hidden workspace is attributed to the last deliberate
 /// action only within this window.
@@ -70,16 +71,31 @@ private let anchorRefreshWindow: TimeInterval = 1.0
     return (intent.workspaceName, intent.windowId, grab)
 }
 
+/// Called from MacWindow.garbageCollect for real (non-popup) windows. A close
+/// triggers machine-generated refocus (macOS re-keys some other window), and
+/// that refocus must not ride the user's own close keystroke/click: cmd-w and
+/// a click on the close button both record an intent milliseconds BEFORE the
+/// window dies. Only intents fresher than the last removal count.
+@MainActor func recordWindowRemoval() {
+    lastWindowRemovalAt = Date()
+}
+
 /// Steal guard: is a native focus change onto a hidden workspace plausibly the
 /// direct result of a deliberate activation (cmd-tab, Dock click)?
 @MainActor func hiddenWsFocusPermittedByUserIntent() -> Bool {
     guard let intent = lastUserIntent else { return false }
-    return intent.kind != .hotkeyBinding && Date().timeIntervalSince(intent.at) < hiddenWsAcceptWindow
+    if intent.kind == .hotkeyBinding { return false }
+    if let removal = lastWindowRemovalAt, intent.at <= removal { return false }
+    return Date().timeIntervalSince(intent.at) < hiddenWsAcceptWindow
 }
 
 @MainActor func describeUserIntent() -> String {
     guard let intent = lastUserIntent else { return "none" }
-    return "\(intent.kind.rawValue)+\(Int(Date().timeIntervalSince(intent.at) * 1000))ms"
+    var s = "\(intent.kind.rawValue)+\(Int(Date().timeIntervalSince(intent.at) * 1000))ms"
+    if let removal = lastWindowRemovalAt, intent.at <= removal {
+        s += "/pre-close"
+    }
+    return s
 }
 
 @MainActor private var prevFlagsHadCmd = false

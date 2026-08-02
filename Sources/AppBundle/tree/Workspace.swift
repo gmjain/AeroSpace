@@ -128,13 +128,16 @@ extension Monitor {
 
     @MainActor
     func setActiveWorkspace(_ workspace: Workspace) -> Bool {
-        // [FORK gmjain/AeroSpace]
-        if activeWorkspace != workspace {
+        // [FORK gmjain/AeroSpace] log after the assignment so a rejected one
+        // (isValidAssignment) can't masquerade as a successful transition.
+        let prev = activeWorkspace
+        let result = rect.topLeftCorner.setActiveWorkspace(workspace)
+        if prev != workspace {
             forkDebugLog("setActiveWorkspace: monitor \(monitorId_oneBased?.description ?? "?") "
-                + "\(activeWorkspace.name) -> \(workspace.name) "
+                + "\(prev.name) -> \(workspace.name)\(result ? "" : " FAILED") "
                 + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
         }
-        return rect.topLeftCorner.setActiveWorkspace(workspace)
+        return result
     }
 }
 

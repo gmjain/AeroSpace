@@ -38,7 +38,9 @@ import Common
         if let nativeFocused, nativeFocused.nodeWorkspace != focus.workspace {
             forkDebugLog("updateFocusCache: native focus \(forkDebugDescribe(nativeFocused)) "
                 + "pulls focus away from ws \(focus.workspace.name) "
-                + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
+                + "(targetWsVisible: \(nativeFocused.nodeWorkspace?.isVisible.description ?? "nil"), "
+                + "intent: \(describeUserIntent()), "
+                + "session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
         }
         _ = nativeFocused?.focusWindow()
         lastKnownNativeFocusedWindowId = nativeFocused?.windowId
