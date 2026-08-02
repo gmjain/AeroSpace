@@ -137,6 +137,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     // "on-focused-workspace-changed": Parser(\.onFocusedWorkspaceChanged, { parseCommandOrCommands($0).toParsedConfig($1) }),
 
     "enable-normalization-flatten-containers": Parser(\.enableNormalizationFlattenContainers, parseBool),
+    "auto-split-by-aspect": Parser(\.autoSplitByAspect, parseBool), // [FORK gmjain/AeroSpace]
     "enable-normalization-opposite-orientation-for-nested-containers": Parser(\.enableNormalizationOppositeOrientationForNestedContainers, parseBool),
 
     "default-root-container-layout": Parser(\.defaultRootContainerLayout, parseLayout),
