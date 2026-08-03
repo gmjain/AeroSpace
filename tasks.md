@@ -3,6 +3,26 @@
 Task tracker + orientation for the AeroSpace fork work. Companion to [FORK.md](FORK.md)
 (what's already built). Pick up from here after a chat compaction.
 
+## Current deployed state (as of 2026-08-03)
+
+- **Deployed binary: fork.7, commit 647476a5** (`aerospace --version` confirms — always check
+  this first). That's the allowlist-guard build; the intent clock (fork.8) was deployed for ~3h
+  on 2026-08-02, regressed spawn placement, and was **rolled back** (postmortem: task 1 below).
+- **Git**: checkout is branch `user-intent-clock` — parked intent-clock code + all current docs
+  live on its tip. `main` (bcb0f6c3) is 3 docs-only commits ahead of the deployed commit; both
+  are the same code as deployed. Do NOT merge the branch's code commits into main.
+- **Config** (~/git/config/aerospace/aerospace.toml): `focus-steal-guard-apps` = WezTerm +
+  Chrome + Claude (Chrome/Claude added 2026-08-02 — fixes the close-then-switch bounce);
+  alt-enter spawns via `wezterm cli --no-auto-start spawn --new-window || open -n` (Journey 5
+  fix, adopted 2026-08-03); `fork-debug-log = true` (still observing).
+- **Design doctrine** (from the 2026-08-02 incident + ecosystem research,
+  [focus-steal-research.md](focus-steal-research.md)): no timing-based intent inference, ever.
+  Per-app lists are the ecosystem's best practice; the escalation path is default-deny with
+  state-based cause tokens (cmd-tab switcher window, Dock-click hit-test), not heuristics.
+- Reference docs: [focus-steal-research.md](focus-steal-research.md) (focus/activation),
+  [upstream-prs.md](upstream-prs.md) (PR adoption backburner), FORK.md (features + deploy
+  recipe + gotchas).
+
 ## Where everything lives
 
 | Thing | Location |

@@ -5,8 +5,11 @@ manager. Before doing anything, read:
 
 1. `FORK.md` — what diverges from upstream and why, all fork features, build/deploy recipe,
    hard-won gotchas (signature-cache SIGKILL, config auto-reload ordering, relauncher race).
-2. `tasks.md` — task queue (next up: global user-intent clock) and the map of where config,
-   scripts, state files, and deployed binaries live.
+2. `tasks.md` — **start with "Current deployed state"**, then the task queue and the map of
+   where config, scripts, state files, and deployed binaries live.
+3. When touching focus/steal/activation behavior: `focus-steal-research.md` (ecosystem survey,
+   the intent-clock postmortem's design conclusions, Journey 5). For upstream PR adoption:
+   `upstream-prs.md` (backburnered sweep).
 
 Rules:
 - `main` is the deployable patch queue (linear, rebase mechanics). Develop on a feature branch,

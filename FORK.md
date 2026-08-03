@@ -57,29 +57,34 @@ LaunchServices activation churn, and FFM MRU pollution. Includes a 2s post-place
 
 ### 6. focus-steal-guard-apps (config)
 `Sources/AppBundle/focusCache.swift: updateFocusCache`.
-Multi-instance apps (WezTerm runs one process per window) fire `AXFocusedWindowChanged` from
-background instances; upstream accepts every native focus event, silently flipping the active
-workspace (symptom: `focus right` across monitors lands on the wrong workspace, because it
-targets the monitor's *active* workspace). For listed apps, native focus pointing at a window on
-a **non-visible** workspace is rejected and macOS is pushed back. Safe because genuine user
-interactions (click/FFM) always target visible windows. Known cost: cmd-tab to a hidden listed
-app snaps back.
+Apps fire `AXFocusedWindowChanged`/activation from the background; upstream accepts every
+native focus event, silently flipping the active workspace (symptom: `focus right` across
+monitors lands on the wrong workspace, because it targets the monitor's *active* workspace).
+For listed apps, native focus pointing at a window on a **non-visible** workspace is rejected
+and macOS is pushed back. Safe because genuine user interactions (click/FFM) always target
+visible windows. Known cost: cmd-tab/Dock-click to a hidden listed app silently no-ops.
+List history: WezTerm (multi-instance self-activation, the original motivation); Chrome +
+Claude added 2026-08-02 (after closing a window, macOS re-keys one of their windows on the
+now-hidden workspace → bounce). Notes: modern WezTerm delegates `open -n` launches to the
+existing GUI instance, so one-process-per-window is fading — once converged to a single
+instance, WezTerm may be delistable (restoring cmd-tab to it). The delegation handshake
+itself was the "Journey 5" focus jump, fixed config-side: alt-enter now spawns via
+`wezterm cli spawn --new-window` (see focus-steal-research.md).
 
-### 7. user-intent clock (supersedes the #5/#6 app allowlists)
-`Sources/AppBundle/userIntent.swift` + hooks in `HotkeyBinding.swift`, `focus.swift`,
-`focusCache.swift`, `MacWindow.swift`, `initAppBundle.swift`.
-One in-process record of the last deliberate user action (hotkey binding, global mouse-down,
-cmd-keystroke/flagsChanged via NSEvent global monitors) and its focus context. Focus changes
-within 1s of an action re-anchor it (a click's own focus effect, exec-and-forget scripts calling
-the CLI). Placement: every new window within `spawn-intent-timeout-ms` of an action anchors to
-the intent context; the first one also grabs focus + arms the spawn focus guard. Steal guard:
-native focus onto a hidden workspace is accepted only within 1s of a mouse-down/cmd-keystroke —
-**never merely a hotkey binding**, because 2026-08-02 log data showed steals riding hotkeyBinding
-and ax(AXMoved) sessions (Chrome@hidden-ws bounce loop after closing a window there). That data
-also killed the session-event-discrimination alternative: rejected steals were not confined to
-bare AXFocusedWindowChanged sessions. `spawn-intent-apps` / `focus-steal-guard-apps` are now
-parsed-but-ignored (kept for config auto-reload ordering; drop keys from config after deploy,
-then remove the stubs).
+### 7. user-intent clock — BUILT, DEPLOYED ~3h, ROLLED BACK (2026-08-02); NOT in main
+`Sources/AppBundle/userIntent.swift` + hooks — parked on branch `user-intent-clock`, never
+merged. It replaced the #5/#6 allowlists with global timing rules: new-window placement
+anchored to the last deliberate action (hotkey/mouse/cmd-keystroke via NSEvent global
+monitors), and hidden-ws focus accepted only within 1s of a mouse/cmd action. **Why it
+failed:** `refreshUserIntentAnchor` attributed ANY focus change within 1s to the user — a
+background WezTerm self-activation onto a *visible* workspace poisoned the spawn anchor, so
+every alt-enter window landed next to the old WezTerm (log-confirmed 17:09 2026-08-02).
+Design conclusion — machine events always land within 1s of some real user action; timing
+windows turn coincidence into consent. **Do not rebuild intent-by-timing.** Full postmortem:
+tasks.md task 1; ecosystem research (nobody has solved user-vs-app attribution; the OS's
+intent bit is write-only): `focus-steal-research.md`. #5/#6 remain the live mechanisms.
+Salvageable paradigm-neutral commits on the parked branch: RestartCommand absolute-path
+relaunch (a276bbe7), setActiveWorkspace log-after-success, close-invalidates-intents idea.
 
 ### 8. fork-debug-log (config)
 `Sources/AppBundle/forkDebugLog.swift`. Opt-in tracing to
@@ -106,12 +111,20 @@ git checkout .   # generate.sh dirties generated files
 # deploy
 rm -rf /Applications/AeroSpace.app && cp -R .release/AeroSpace.app /Applications/
 rm -f /opt/homebrew/bin/aerospace && cp .release/aerospace /opt/homebrew/bin/aerospace
+rm -rf xcode/.xcode-build/Build/Products/Release/AeroSpace.app   # see relauncher gotcha
 aerospace restart   # fork command: layouts survive
 ```
 
 Gotchas (all learned in production):
 - **rm before cp** for the CLI: overwriting a signed binary in place gets later execs SIGKILLed
   by the kernel signature cache (exit 137).
+- **Relauncher uses `open -a AeroSpace`** (until parked commit a276bbe7 ships): LaunchServices
+  may resolve to the xcode build-products copy instead of /Applications — the server then runs
+  from the build dir and the next xcodebuild rewrites its backing binary. Delete the
+  build-products .app before `aerospace restart` (now part of the recipe above).
+- **Verify what's actually running before diagnosing**: `aerospace --version` prints the
+  embedded git hash. Trust it over binary mtimes — on 2026-08-02 a build was deployed that
+  predated the commit everyone assumed was live, and two wrong diagnoses followed.
 - **Binaries first, config second**: the live config auto-reloads into the running server, which
   rejects unknown (new) keys.
 - New commands need a `docs/aerospace-<name>.adoc` (generate-cmd-help.sh produces the
@@ -134,11 +147,16 @@ Gotchas (all learned in production):
 
 ## Open items
 
-- **Validate the user-intent clock in daily use** (feature #7, deployed from `user-intent-clock`
-  branch): watch fork-debug.log for wrong REJECTED lines (legit cmd-tab/Dock activations showing
-  `intent: none` — would mean the global monitors miss those events) and wrong ACCEPTED lines
-  (steals landing inside the 1s coincidence window). Then delete both allowlist keys from
-  aerospace.toml and later remove the parsed-but-ignored stubs.
+See tasks.md for the live queue (starts with "Current deployed state"). Highlights:
+- Validate 2026-08-02/03 changes in daily use: Chrome/Claude guard entries (close-bounce fix),
+  alt-enter via `wezterm cli spawn` (Journey 5 fix), cold-start fallback path.
+- Once WezTerm converges to a single instance: consider delisting it from
+  focus-steal-guard-apps (restores cmd-tab to hidden WezTerm).
 - Upstream PR for #1 (FFM re-raise guard), referencing discussion #2177.
-- Possibly upstream dump-tree/load-tree (#2173 and #57 are circling layout persistence).
-- Disable fork-debug-log once the alt-l/ws4 steal is confirmed dead in daily use.
+- dump-tree/load-tree upstreaming plan changed: comment on upstream #1958/#1957 instead of a
+  competing PR (see upstream-prs.md).
+- Disable fork-debug-log after a few clean days.
+- Docs (tasks.md, focus-steal-research.md, upstream-prs.md, this file's updates) currently live
+  on the checked-out `user-intent-clock` branch tip alongside the parked intent-clock code;
+  `main` is 3 docs-only commits behind the branch point. Decide eventually: graft doc commits
+  onto `main` or keep working from the branch tip.
