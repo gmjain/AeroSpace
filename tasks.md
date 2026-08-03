@@ -28,17 +28,38 @@ keep history linear.
 
 ## Active tasks
 
-### 1. User-intent clock: DEPLOYED 2026-08-02 14:52 as fork.8, validating
-Correction: the 14:02 deploy was actually fork.7 (allowlist guard, commit 647476a5) — the
-binary's embedded git hash proved the intent clock had never shipped; the "close WezTerm,
-switch fast, get bounced back" repro at 14:37 ran against fork.7 and was the allowlist missing
-Chrome, not an intent-clock bug. fork.8 (ea0d71bd) = intent clock + close-invalidation (a
-window close invalidates older intents, so machine refocus after cmd-w/close-click can't ride
-the close's own keystroke). Deployed from the feature branch before ff-merge; `main` is still
-at bcb0f6c3. After validation: ff-merge `user-intent-clock` → `main`.
-Queued, ships next deploy: RestartCommand relaunches `/Applications/AeroSpace.app` by absolute
-path (`open -a` picked the xcode build-products copy by LaunchServices whim; worked around
-live by deleting the build-dir app before restarting).
+### 1. User-intent clock: ROLLED BACK 2026-08-02 ~17:14 — fork.7 redeployed, branch PARKED
+History of the day: 14:02 deploy was fork.7 (allowlist, 647476a5) — the intent clock never
+shipped then (binary's embedded git hash proved it). The 14:37 close-WezTerm→bounce-to-ws10
+repro ran against fork.7: Chrome/Claude simply weren't in `focus-steal-guard-apps`. fork.8
+(intent clock + close-invalidation, ea0d71bd) shipped 14:52 and caused a WORSE regression:
+every alt-enter spawn landed on whatever ws had a visible WezTerm window. Rolled back to
+fork.7 at user's direction; deployed binary = 647476a5 (3 docs-only commits behind `main`).
+
+Regression mechanism (log-confirmed 17:09, not theory): `open -n -a wezterm` makes an
+EXISTING WezTerm instance self-activate → the pull targets a VISIBLE ws (other monitor), so
+the hidden-ws guard doesn't apply → setFocus fires `refreshUserIntentAnchor`, which attributes
+ANY focus change within 1s to the user's last action and moved the spawn anchor to that ws →
+new window placed there. Counter-proof in the same log: at 17:10:09 the same self-activation
+hit a HIDDEN ws, was REJECTED, and the spawn landed correctly.
+
+Design conclusion — do NOT rebuild intent-by-timing: machine-generated focus events always
+land within 1s of some genuine user action, so timing windows turn coincidence into consent.
+The allowlists work because they encode per-app ground truth macOS doesn't expose (which apps
+self-activate spuriously); maintenance cost is one config line per offender (Chrome + Claude
+added 2026-08-02, config commit ced5494 — this alone fixes the close-bounce that motivated
+the clock). The old spawn anchor was immune because it bound the context AT the keybinding
+(attribution by cause); the clock broke that by re-anchoring on ambient focus changes.
+
+Branch `user-intent-clock` (5 commits) stays parked. Paradigm-neutral bits worth salvaging
+into a future fork.7.x on main: RestartCommand absolute-path relaunch (a276bbe7 — `open -a`
+resurrects the xcode build-products copy; until then, delete that copy before `aerospace
+restart` after any xcodebuild), setActiveWorkspace log-after-success, enriched steal-guard
+logs, and the close-invalidation idea if a close-adjacent steal ever bites a listed app.
+
+If steal bounces from NEW apps keep appearing, the escalation path is: (a) keep adding to the
+list (cheap, predictable), or (b) default-deny: reject ALL hidden-ws native pulls, with a
+cause-attributed cmd-tab/Dock exception as the only door. Not (c) global timing heuristics.
 Decision gate resolved 2026-08-02: session-event discrimination is **not viable**. Log evidence
 (user reproduced a bounce loop by closing WezTerm on ws10 and switching to ws4): Chrome@ws10
 steals arrived in sessions tagged `hotkeyBinding` and `ax(AXMoved)`, not just bare
