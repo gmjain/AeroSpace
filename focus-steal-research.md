@@ -72,6 +72,20 @@ sip which is not on the table").
 5. `CGEventSourceSecondsSinceLastEventType` — public API, "seconds since last real HID
    input of type X", no permissions. Weaker (still proximity-flavored) but zero-cost.
 
+## Journey 5 experiment (2026-08-02, negative result)
+
+"On ws10, alt-enter → focus jumps to the old WezTerm on the other monitor's visible ws."
+Tested killing the activation at the launcher: `open -n -g -a wezterm` (17:54) and direct
+`exec wezterm-gui` bypassing Launch Services entirely (17:57). **Old instance (pid 45445)
+activated in both cases** (`NSWorkspaceDidActivate` + `AXFocusedWindowChanged` pulls in
+fork-debug.log). Conclusion: WezTerm's own new-instance startup keys the existing instance's
+window — not Launch Services, not fixable with launch flags. WM-side mitigation remains
+steal-guard (hidden ws) + spawn-intent grab (yanks focus to the new window). Untested
+alternative that would remove the cause entirely: stop spawning new processes — have
+alt-enter run `wezterm cli spawn --new-window` (new window in the EXISTING process via the
+mux; no second instance, no handshake, one cmd-tab entry), with `open -n -a wezterm` as
+fallback when none is running. Note this inverts FORK.md #6's one-process-per-window premise.
+
 ## Design conclusion for this fork
 
 - **The per-app deny list stays** — it is what Rift ships, what upstream's community keeps
