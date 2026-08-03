@@ -80,11 +80,18 @@ Tested killing the activation at the launcher: `open -n -g -a wezterm` (17:54) a
 activated in both cases** (`NSWorkspaceDidActivate` + `AXFocusedWindowChanged` pulls in
 fork-debug.log). Conclusion: WezTerm's own new-instance startup keys the existing instance's
 window — not Launch Services, not fixable with launch flags. WM-side mitigation remains
-steal-guard (hidden ws) + spawn-intent grab (yanks focus to the new window). Untested
-alternative that would remove the cause entirely: stop spawning new processes — have
-alt-enter run `wezterm cli spawn --new-window` (new window in the EXISTING process via the
-mux; no second instance, no handshake, one cmd-tab entry), with `open -n -a wezterm` as
-fallback when none is running. Note this inverts FORK.md #6's one-process-per-window premise.
+steal-guard (hidden ws) + spawn-intent grab (yanks focus to the new window). **Resolution (2026-08-03, ADOPTED):** alt-enter now runs
+`wezterm cli --no-auto-start spawn --new-window || open -n -a wezterm` — the window opens in
+the EXISTING process via the mux: no second instance, no handshake, no focus jump. Confirmed
+working. Two supporting discoveries: (a) modern WezTerm's own GUI log says even `open -n`
+launches delegate to the existing GUI instance ("Spawned your command via the existing GUI
+instance. Use wezterm start --always-new-process if you do not want this behavior") — the
+delegation handshake IS the Journey 5 activation, and one-process-per-window (FORK.md #6's
+premise) is already obsolete upstream; (b) a 3-5s spawn delay traced to a stale gui socket
+left by the 14:25 wezterm crash — the cli tried it, auto-started a pointless mux-server,
+then fell back; `--no-auto-start` caps that failure mode at fail-fast. Follow-up candidates
+once WezTerm converges to a single instance: delist it from focus-steal-guard-apps (would
+restore cmd-tab-to-hidden-WezTerm) and possibly spawn-intent-apps.
 
 ## Design conclusion for this fork
 

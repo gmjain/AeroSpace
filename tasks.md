@@ -83,6 +83,14 @@ Remaining:
   action now grabs focus (was: listed apps only); a background window appearing within 5s of a
   click gets yanked to the current workspace.
 
+### 1b. Journey 5 fixed via wezterm mux spawn (2026-08-03) — watch, then simplify lists
+alt-enter now spawns via `wezterm cli --no-auto-start spawn --new-window` (fallback `open -n`);
+no new process → no delegation handshake → no focus jump to the other monitor's WezTerm.
+Details + discoveries in [focus-steal-research.md](focus-steal-research.md) (Journey 5
+resolution). After a few clean days AND WezTerm converged to a single instance: consider
+delisting wezterm from focus-steal-guard-apps (restores cmd-tab-to-hidden-WezTerm) and
+re-evaluating spawn-intent-apps.
+
 ### 2. Confirm the ws4 steal is dead, then disable fork-debug-log
 `fork-debug-log = true` is live to observe the steal guard. After a few clean days: flip to
 false (or remove the key) in aerospace.toml. Keep the feature in the fork — it's cheap and it
