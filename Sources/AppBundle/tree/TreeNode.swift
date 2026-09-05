@@ -152,6 +152,10 @@ struct BindingData {
     let parent: NonLeafTreeNodeObject
     let adaptiveWeight: CGFloat
     let index: Int
+    // [FORK gmjain/AeroSpace] auto-split-by-aspect: the container created to wrap the MRU window
+    // for this binding, so the caller can unwrap it if the new window ends up somewhere else
+    // (see MacWindow.swift: dropAutoSplitWrapperIfRedundant). nil for every other binding.
+    var autoSplitWrapper: TilingContainer? = nil
 }
 
 final class NilTreeNode: TreeNode, NonLeafTreeNodeObject {

@@ -34,9 +34,17 @@ final class MacWindow: Window {
         )
 
         // atomic synchronous section
-        if let existing = allWindowsMap[windowId] { return existing }
+        if let existing = allWindowsMap[windowId] {
+            dropAutoSplitWrapperIfRedundant(data.autoSplitWrapper) // [FORK gmjain/AeroSpace]
+            return existing
+        }
         let window = MacWindow(windowId, macApp, lastFloatingSize: rect?.size, parent: data.parent, adaptiveWeight: data.adaptiveWeight, index: data.index)
         allWindowsMap[windowId] = window
+        // [FORK gmjain/AeroSpace] auto-split-by-aspect wrapped the MRU window to receive this
+        // window. If the window does not stay there (on-window-detected moved or floated it, the
+        // closed-windows cache restored it elsewhere), the wrapper would linger as a redundant
+        // single-child container — forever with enable-normalization-flatten-containers = false.
+        defer { dropAutoSplitWrapperIfRedundant(data.autoSplitWrapper) }
 
         try await debugWindowsIfRecording(window, .cancellable)
         if try await !restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: window) {
@@ -248,7 +256,13 @@ private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, w
            let rect = mruWindow.lastAppliedLayoutPhysicalRect {
             let desired: Orientation = rect.width >= rect.height ? .h : .v
             if desired != tilingParent.orientation {
-                if tilingParent.children.count == 1 {
+                // changeOrientation cascades to every ancestor container when
+                // enable-normalization-opposite-orientation-for-nested-containers is on, so a lone
+                // NESTED container (possible mid-refresh: dead windows are GC'd before new ones are
+                // registered, normalization runs later) is wrapped like any other, not flipped.
+                if tilingParent.children.count == 1,
+                   tilingParent.isRootContainer || !config.enableNormalizationOppositeOrientationForNestedContainers
+                {
                     // MRU window is alone: just flip its container.
                     tilingParent.changeOrientation(desired)
                 } else {
@@ -268,6 +282,7 @@ private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, w
                         parent: newParent,
                         adaptiveWeight: WEIGHT_AUTO,
                         index: INDEX_BIND_LAST,
+                        autoSplitWrapper: newParent,
                     )
                 }
             }
@@ -283,6 +298,24 @@ private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, w
             adaptiveWeight: WEIGHT_AUTO,
             index: INDEX_BIND_LAST,
         )
+    }
+}
+
+// [FORK gmjain/AeroSpace] auto-split-by-aspect: `wrapper` was created to hold the MRU window plus
+// one new window. If it is left with a single child, hand that child the wrapper's own binding
+// (weight + index in the grandparent) and drop the wrapper. MRU bookkeeping mirrors
+// unbindEmptyAndAutoFlatten. Safe on any tree state: only bound nodes are unbound.
+@MainActor
+private func dropAutoSplitWrapperIfRedundant(_ wrapper: TilingContainer?) {
+    guard let wrapper, let grandparent = wrapper.parent, let child = wrapper.children.singleOrNil() else { return }
+    let mru = grandparent.mostRecentChild
+    child.unbindFromParent()
+    let binding = wrapper.unbindFromParent()
+    child.bind(to: binding.parent, adaptiveWeight: binding.adaptiveWeight, index: binding.index)
+    if mru != wrapper {
+        mru?.markAsMostRecentChild()
+    } else {
+        child.markAsMostRecentChild()
     }
 }
 
