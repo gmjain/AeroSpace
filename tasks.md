@@ -19,8 +19,9 @@ Task tracker + orientation for the AeroSpace fork work. Companion to [FORK.md](F
 | Assistant memory | `~/.claude/projects/-Users-gmjain-git-config/memory/aerospace-local-fork.md` (+ `aerospace-todos.md`) |
 
 Config conventions: fork-only keys and behaviors are marked `# [FORK gmjain/AeroSpace]` comment
-headers in `aerospace.toml`. Alt-enter spawns WezTerm with plain `open -n -a wezterm`; placement
-and focus are entirely the WM's job (spawn-intent).
+headers in `aerospace.toml`. Alt-enter spawns WezTerm through the running mux (`wezterm cli
+--no-auto-start spawn --new-window`, `open -n` only as fallback, adopted 2026-08-03); placement and
+focus are entirely the WM's job (spawn-intent).
 
 Fork workflow: feature branch → `swift build` + `swift test` → ff-merge to `main` → build release
 (recipe in FORK.md) → deploy → `aerospace restart`. Always deploy `main`. User is a rebase fan;
@@ -74,6 +75,22 @@ fork-flavored and probably stays ours.
 On next upstream release: fetch into `upstream` branch, rebase `main`, re-check each fork commit
 (FFM guard may conflict with upstream FFM evolution — it's a fast-moving beta feature), bump
 `--build-version`, redeploy. FORK.md has the recipe.
+
+### 7. Three-finger swipe → AeroSpace workspaces (PARKED 2026-09-05, recon done)
+Today 3-finger left/right = macOS "Swipe between pages" (`TrackpadThreeFingerHorizSwipeGesture = 1`,
+browser/Finder back-forward); 4-finger = Spaces. Plan when picked up:
+- Turn the macOS gesture Off in System Settings → Trackpad → More Gestures (`defaults write` alone
+  needs a re-login).
+- Hammerspoon (1.1.1, running): `hs.eventtap.new({types.gesture})` + `event:getTouches()` (per-finger
+  `identity`/`phase`/`normalizedPosition`); exactly 3 fingers moving horizontally past a threshold →
+  fire once per gesture. Karabiner/kanata can't see gestures; no BTT installed.
+- Action: `aerospace workspace --wrap-around next|prev` = workspaces on the *focused monitor*
+  (alphabetical: feed `list-workspaces --monitor focused | sort -V` via `--stdin` to avoid 1→10→2).
+  Swipe left → next, matching Spaces; make it a flag.
+- Caveats: Synergy forwards no gestures (works only on the Mac whose trackpad is touched); untested
+  whether touch events still reach the tap with the gesture Off (expected yes; fallback: leave it on
+  "pages" and swallow `swipe` events in the tap).
+- New `~/.hammerspoon/swipe_workspaces.lua` (~60 lines) + `require` in init.lua.
 
 ## Done (see FORK.md for detail)
 FFM no-re-raise · dump-tree/load-tree · restart (+ relauncher race fix) · auto-split-by-aspect ·
