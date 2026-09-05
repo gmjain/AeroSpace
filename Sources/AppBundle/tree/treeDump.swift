@@ -274,12 +274,20 @@ private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeN
 // ---------------------------------------------------------------- restart
 
 let restartStatePath = NSString("~/.local/state/aerospace/restart-tree.json").expandingTildeInPath
+let restartFailedLogPath = NSString("~/.local/state/aerospace/restart-failed.log").expandingTildeInPath
 private let restartStateMaxAge: TimeInterval = 90
 
 @MainActor func saveRestartState() throws {
     let dir = (restartStatePath as NSString).deletingLastPathComponent
     try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
     try dumpTreeJson().write(toFile: restartStatePath, atomically: true, encoding: .utf8)
+}
+
+/// `restart --no-restore`: a file left behind by an earlier restart whose
+/// restore never ran (it is only deleted once loaded) must not be picked up
+/// by the instance about to start.
+func clearRestartState() {
+    try? FileManager.default.removeItem(atPath: restartStatePath)
 }
 
 /// Called once during startup, after initial window detection. If a restart
