@@ -316,7 +316,8 @@ private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, w
 // unbindEmptyAndAutoFlatten. Safe on any tree state: only bound nodes are unbound.
 @MainActor
 private func dropAutoSplitWrapperIfRedundant(_ wrapper: TilingContainer?) {
-    guard let wrapper, let grandparent = wrapper.parent, let child = wrapper.children.singleOrNil() else { return }
+    // The grandparent must be a TilingContainer: binding a window straight under a Workspace dies.
+    guard let wrapper, let grandparent = wrapper.parent as? TilingContainer, let child = wrapper.children.singleOrNil() else { return }
     let mru = grandparent.mostRecentChild
     child.unbindFromParent()
     let binding = wrapper.unbindFromParent()
