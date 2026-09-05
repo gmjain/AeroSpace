@@ -6,6 +6,9 @@ Owner: Gaurav Jain. This file is the canonical record of what diverges and why.
 ## Git flow
 
 - `upstream` — tracks `upstream/main` (nikitabobko). `git fetch upstream` lands here.
+  **Never push there.** Remote `upstream` has push URL `DISABLED` (`git remote set-url --push`)
+  so an accidental `git push upstream` fails. Checked 2026-09-05: upstream idle since 2026-07-03
+  (one cosmetic rename `Monitor`→`MonitorInfo`, c548c7f8) — no rebase needed yet.
 - `main` — **the deployable patch queue**. Linear history: upstream tag + fork commits, rebase
   mechanics (no merge commits). Currently based on `v0.21.3-Beta`.
 - Features are developed on branches (`tree-dump-load`, `auto-split`, `spawn-intent`, ...),
