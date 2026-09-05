@@ -32,6 +32,29 @@ struct NodeDump: Codable, Sendable {
     var app: String? = nil // windows, informational only
 }
 
+// Lenient decoding: the synthesized init treats defaulted non-optionals as
+// required keys, which rejects hand-edited documents. Only `name` and `type`
+// are mandatory. (Kept in extensions so the memberwise inits survive.)
+extension TreeDump {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        focusedWindowId = try c.decodeIfPresent(UInt32.self, forKey: .focusedWindowId)
+        workspaces = try c.decodeIfPresent([WorkspaceDump].self, forKey: .workspaces) ?? []
+    }
+}
+
+extension WorkspaceDump {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        monitorId = try c.decodeIfPresent(Int.self, forKey: .monitorId)
+        visible = try c.decodeIfPresent(Bool.self, forKey: .visible) ?? false
+        focused = try c.decodeIfPresent(Bool.self, forKey: .focused) ?? false
+        root = try c.decodeIfPresent(NodeDump.self, forKey: .root)
+        floating = try c.decodeIfPresent([NodeDump].self, forKey: .floating) ?? []
+    }
+}
+
 // ------------------------------------------------------------------- dump
 
 @MainActor func dumpTree() -> TreeDump {
@@ -103,14 +126,24 @@ struct NodeDump: Codable, Sendable {
 
     // 2) Tree rebuild per workspace.
     for wsDump in dump.workspaces {
-        guard let rootDump = wsDump.root else { continue }
         let workspace = Workspace.get(byName: wsDump.name)
-        let prevRoot = workspace.rootTilingContainer
-        let orphans = prevRoot.allLeafWindowsRecursive
-        prevRoot.unbindFromParent()
-        buildNode(rootDump, parent: workspace, forceOrientation: nil)
-        for window in orphans where !window.isBound {
-            try? await window.relayoutWindow(on: workspace, .nonCancellable, forceTile: true)
+        if let rootDump = wsDump.root {
+            // A Workspace may only hold containers; a window bound directly to
+            // it is an illegal child-parent relation (die). Skip such entries.
+            guard rootDump.type == "container" else { continue }
+            let prevRoot = workspace.rootTilingContainer
+            let orphans = prevRoot.allLeafWindowsRecursive
+            prevRoot.unbindFromParent()
+            buildNode(rootDump, parent: workspace)
+            for window in orphans where !window.isBound {
+                try? await window.relayoutWindow(on: workspace, .nonCancellable, forceTile: true)
+            }
+        }
+        // Floating windows were dumped but never loaded: after a restart they
+        // got re-detected as tiling on the startup workspace and force-tiled there.
+        for floatingDump in wsDump.floating {
+            guard let window = rebindableWindow(floatingDump) else { continue }
+            window.bindAsFloatingWindow(to: workspace)
         }
     }
 
@@ -124,10 +157,10 @@ struct NodeDump: Codable, Sendable {
     }
 }
 
-@MainActor private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject, forceOrientation: Orientation?) {
+@MainActor private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) {
     switch dump.type {
         case "container":
-            let orientation: Orientation = forceOrientation ?? (dump.orientation == "v" ? .v : .h)
+            let orientation: Orientation = dump.orientation == "v" ? .v : .h
             let layout = dump.layout.flatMap { Layout(rawValue: $0) } ?? .tiles
             let container = TilingContainer(
                 parent: parent,
@@ -137,10 +170,11 @@ struct NodeDump: Codable, Sendable {
                 index: INDEX_BIND_LAST,
             )
             for child in dump.children ?? [] {
-                buildNode(child, parent: container, forceOrientation: nil)
+                buildNode(child, parent: container)
             }
         case "window":
-            guard let id = dump.id, let window = Window.get(byId: id) else { return }
+            guard !(parent is Workspace) else { return } // see loadTree
+            guard let window = rebindableWindow(dump) else { return }
             // bind() implicitly unbinds first, so this also pulls windows
             // from other workspaces.
             window.bind(
@@ -149,6 +183,22 @@ struct NodeDump: Codable, Sendable {
                 index: INDEX_BIND_LAST,
             )
         default: return
+    }
+}
+
+/// The live window for a dump entry, if it may be rebound into a tiling or
+/// floating container. Windows macOS currently holds minimized/fullscreen/
+/// hidden (and AeroSpace's popups) must stay where their native state put
+/// them: normalizeLayoutReason only moves windows whose native state
+/// *changes*, so rebinding one into tiling leaves a blank tile until the user
+/// restores it.
+@MainActor private func rebindableWindow(_ dump: NodeDump) -> Window? {
+    guard let id = dump.id, let window = Window.get(byId: id) else { return nil }
+    guard window.layoutReason == .standard else { return nil }
+    return switch window.windowParentCases {
+        case .tilingContainer, .floatingWindowsContainer, .unbound: window
+        case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
+             .macosHiddenAppsWindowsContainer, .macosPopupWindowsContainer: nil
     }
 }
 
