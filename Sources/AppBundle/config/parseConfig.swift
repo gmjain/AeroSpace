@@ -139,7 +139,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "enable-normalization-flatten-containers": Parser(\.enableNormalizationFlattenContainers, parseBool),
     "auto-split-by-aspect": Parser(\.autoSplitByAspect, parseBool), // [FORK gmjain/AeroSpace]
     "spawn-intent-apps": Parser(\.spawnIntentApps, parseArrayOfStrings), // [FORK gmjain/AeroSpace]
-    "spawn-intent-timeout-ms": Parser(\.spawnIntentTimeoutMs, parseInt), // [FORK gmjain/AeroSpace]
+    "spawn-intent-timeout-ms": Parser(\.spawnIntentTimeoutMs, parseSpawnIntentTimeoutMs), // [FORK gmjain/AeroSpace]
     "fork-debug-log": Parser(\.forkDebugLog, parseBool), // [FORK gmjain/AeroSpace]
     "focus-steal-guard-apps": Parser(\.focusStealGuardApps, parseArrayOfStrings), // [FORK gmjain/AeroSpace]
     "enable-normalization-opposite-orientation-for-nested-containers": Parser(\.enableNormalizationOppositeOrientationForNestedContainers, parseBool),
@@ -405,6 +405,14 @@ private func parsePersistentWorkspaces(_ raw: OrderedJson, _ backtrace: ConfigBa
             let set = arr.toOrderedSet()
             return set.count == arr.count ? .success(set) : .failure(.init(backtrace, "Contains duplicated workspace names"))
         }
+}
+
+// [FORK gmjain/AeroSpace] a non-positive timeout would silently disable spawn-intent
+// (no intent is ever "fresh" for 0 ms), so reject it loudly at parse time
+private func parseSpawnIntentTimeoutMs(_ raw: OrderedJson, _ backtrace: ConfigBacktrace) -> ResOrConfigParseDiagnostic<Int> {
+    parseInt(raw, backtrace).flatMap {
+        $0 > 0 ? .success($0) : .failure(.init(backtrace, "spawn-intent-timeout-ms must be positive, got \($0)"))
+    }
 }
 
 private func parseArrayOfStrings(_ raw: OrderedJson, _ backtrace: ConfigBacktrace) -> ResOrConfigParseDiagnostic<[String]> {

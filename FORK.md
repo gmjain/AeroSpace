@@ -50,6 +50,13 @@ tall → stacked) by wrapping it join-with-style. i3's manual-split semantics, d
 point. Replaced an external per-focus-change `aerospace split` daemon hack that littered the tree
 with single-child containers.
 
+2026-09-05 review fixes: the MRU wrapper is now tracked in `BindingData.autoSplitWrapper` and
+unwrapped by `getOrRegister` if the new window doesn't stay in it (`on-window-detected`
+move/float — every Telegram/Zoom launch —, closed-windows-cache restore, duplicate
+registration); previously the anchor was left alone in a redundant container, permanently with
+flatten-normalization off. A lone *nested* container is wrapped, not flipped: `changeOrientation`
+cascades through all ancestors when opposite-orientation normalization is on.
+
 ### 5. spawn-intent (config: spawn-intent-apps, spawn-intent-timeout-ms)
 `Sources/AppBundle/spawnIntent.swift` + hooks in `HotkeyBinding.swift`, `MacWindow.swift`.
 After every hotkey binding executes, remember (focused window, workspace). A new window of a
@@ -57,6 +64,19 @@ listed app appearing within the timeout is born on that workspace, anchored to t
 (auto-split applies), and focused — immune to the detection-time focus race (upstream #1097),
 LaunchServices activation churn, and FFM MRU pollution. Includes a 2s post-placement focus guard
 (`armSpawnFocusGuard`) against late same-app activation steals.
+
+2026-09-05 review fixes: (a) the intent is *peeked* before the async AX calls and consumed only
+once the window is registered with a tiling parent — dialogs, popups and duplicate registrations
+no longer eat it; a newer intent recorded meanwhile wins and the stale placement isn't
+force-focused. (b) `nativeFocus()` right after `focusWindow()` at placement: heavy refresh
+sessions never sync AeroSpace focus to macOS. (c) The guard releases when
+`nativeFocused == focus.windowOrNil` — AeroSpace chose that window itself (FFM, CLI `focus`);
+rejecting it had left AeroSpace and macOS focus on different windows with no re-sync path.
+(d) `.socketServer` sessions that change the focused window/workspace re-record the intent:
+`alt-h/j/k/l` → `exec-and-forget aero-edge-switch` → `aerospace focus` moved focus *after* the
+hotkey recorded it, leaving a 5 s stale anchor. Causal only (the command changed focus), no
+timing heuristics. (e) `spawn-intent-timeout-ms <= 0` is a config error (it silently disabled
+the feature); intent/guard timestamps use `ContinuousClock` (monotonic) instead of `Date`.
 
 ### 6. focus-steal-guard-apps (config)
 `Sources/AppBundle/focusCache.swift: updateFocusCache`.
