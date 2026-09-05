@@ -103,6 +103,10 @@ aerospace restart   # fork command: layouts survive
 ```
 
 Gotchas (all learned in production):
+- **`/opt/homebrew/bin` must be on PATH** before `generate.sh`: `script/setup.sh` nukes PATH and
+  shims `bash` via `which bash`; without Homebrew first it picks system bash 3.2, the sub-scripts
+  die ("bash version is too old"), xcodegen never runs, and xcodebuild fails with
+  "No certificate matching 'aerospace-codesign-certificate'" (2026-09-05).
 - **rm before cp** for the CLI: overwriting a signed binary in place gets later execs SIGKILLed
   by the kernel signature cache (exit 137).
 - **Binaries first, config second**: the live config auto-reloads into the running server, which
