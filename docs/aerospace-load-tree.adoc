@@ -9,7 +9,7 @@ include::util/man-attributes.adoc[]
 == Synopsis
 [verse]
 // tag::synopsis[]
-aerospace load-tree [-h|--help]
+aerospace load-tree [-h|--help] [--stdin|--no-stdin]
 
 // end::synopsis[]
 
@@ -21,17 +21,33 @@ aerospace load-tree [-h|--help]
 
 Reads JSON produced by xref:dump-tree.adoc[aerospace-dump-tree] from stdin and
 reconstructs each workspace: workspace-to-monitor assignment, the tiling tree
-(pulling windows from other workspaces when needed), the visible workspace per
-monitor, and the focused window. Windows mentioned in the dump that no longer
-exist are skipped; live windows not mentioned are force-retiled onto their
-workspace.
+(pulling windows from other workspaces when needed), floating windows, windows
+in macOS native fullscreen or of hidden apps, per-container most-recent child
+(the expanded accordion tab), the `fullscreen` state of windows, the visible
+workspace per monitor, and the focused window. Windows mentioned in the dump
+that no longer exist are skipped; windows macOS currently holds minimized,
+fullscreen or hidden are left where that state put them; live windows not
+mentioned are force-retiled onto their workspace.
 
-Example: `aerospace dump-tree > tree.json; ...; aerospace load-tree < tree.json`
+Only `name` (workspaces) and `type` (nodes) are mandatory in the document;
+every other field defaults when absent, so hand-edited JSON works.
+
+Example: `aerospace dump-tree > tree.json; ...; aerospace load-tree --stdin < tree.json`
 
 // =========================================================== Options
 include::util/conditional-options-header.adoc[]
 
 -h, --help:: Print help
+
+--stdin::
+Read the dump-tree JSON document from the CLI's stdin (up to 4 MiB).
+The CLI does not forward stdin without this flag, so it is required when
+invoking `load-tree` from the command line.
+Incompatible with `--no-stdin`
+
+--no-stdin::
+Ignore stdin, even if provided.
+Incompatible with `--stdin`
 
 // end::body[]
 

@@ -7,7 +7,15 @@ public struct LoadTreeCmdArgs: CmdArgs {
     public static let parser: CmdParser<Self> = .init(
         kind: .loadTree,
         help: load_tree_help_generated,
-        flags: [:],
+        flags: [
+            // The CLI forwards stdin only for commands that opt in (see Cli/_main.swift);
+            // without this flag `aerospace load-tree < f` reached the server with empty stdin.
+            "--stdin": ArgParser(\.commonState.explicitStdinFlag, constSubArgParserFun(true)),
+            "--no-stdin": ArgParser(\.commonState.explicitStdinFlag, constSubArgParserFun(false)),
+        ],
         posArgs: [],
+        conflictingOptions: [
+            ["--stdin", "--no-stdin"],
+        ],
     )
 }
