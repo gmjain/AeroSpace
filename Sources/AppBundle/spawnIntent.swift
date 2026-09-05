@@ -86,6 +86,14 @@ private struct FocusGuard {
     guard let nativeFocused, nativeFocused.windowId != guard_.windowId,
           let guarded = Window.get(byId: guard_.windowId)
     else { return false }
+    // AeroSpace itself already chose this window (focus-follows-mouse, a CLI
+    // `focus`, any command): that is user intent, not an activation steal.
+    // Rejecting it left AeroSpace focus and macOS focus pointing at different
+    // windows with nothing to re-sync them.
+    if nativeFocused == focus.windowOrNil {
+        _focusGuard = nil
+        return false
+    }
     if nativeFocused.app.rawAppBundleId == guarded.app.rawAppBundleId {
         guard_.refires += 1
         _focusGuard = guard_
