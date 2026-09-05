@@ -56,6 +56,7 @@ struct ReloadConfigResult {
         await activateMode_nonCancellable(activeMode)
         syncStartAtLogin()
         syncFocusFollowsMouse(config)
+        syncForkDebugLog(config) // [FORK gmjain/AeroSpace]
         syncConfigFileWatcher()
     }
 
