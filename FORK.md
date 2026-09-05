@@ -33,19 +33,35 @@ hovering X never restored it. Popups still survive: the popup early-return never
 
 ### 2. dump-tree / load-tree commands
 `Sources/AppBundle/tree/treeDump.swift`, `DumpTreeCommand`, `LoadTreeCommand`.
-Exact JSON serialization of every workspace: tiling tree (orientation/layout/weights/window ids),
-floating windows, workspace→monitor mapping, visible + focused workspaces, focused window.
-`load-tree` rebuilds all of it from stdin: pulls windows across workspaces via `bind()`, skips
-vanished windows, force-retiles unmentioned ones. Modeled on the internal
+Exact JSON serialization of every workspace: tiling tree (orientation/layout/weights/window ids,
+per-container MRU child, `fullscreen` flags), floating windows, windows in macOS native
+fullscreen / of hidden apps, workspace→monitor mapping, visible + focused workspaces, focused
+window. `load-tree` rebuilds all of it from stdin (`aerospace load-tree --stdin < tree.json`; the
+CLI forwards stdin only with `--stdin`): pulls windows across workspaces via `bind()`, skips
+vanished windows and windows macOS holds minimized/fullscreen/hidden, force-retiles unmentioned
+ones after every workspace has been rebuilt. Modeled on the internal
 `FrozenTreeNode`/`closedWindowsCache` machinery.
+2026-09-05 review fixes: `--stdin`/`--no-stdin` (the documented `load-tree < f` never reached the
+server with stdin), lenient decoding (only `name`/`type` mandatory), a non-container root no
+longer crashes the server, floating windows are actually loaded, MRU / fullscreen / native-state
+windows round-trip, two-pass rebuild so auto-split-by-aspect can't mutate freshly rebuilt trees.
 
 ### 3. restart command
 `RestartCommand` + auto-load hook in `initAppBundle.swift`.
 Dumps state to `~/.local/state/aerospace/restart-tree.json`, spawns a relauncher that **waits for
 the old pid to die** (quitting un-parks all windows via AX and takes seconds; a naive
-`sleep 1; open` races it and strands the user with no WM — learned the hard way), then the next
-startup auto-loads the file if fresh (<90s). Verified: post-restart `dump-tree` is bit-identical.
-`--no-restore` skips state handling.
+`sleep 1; open` races it and strands the user with no WM — learned the hard way) and then
+relaunches **this exact bundle by path** (`Bundle.main.bundleURL`, forwarding the server args);
+the next startup auto-loads the file if fresh (<90s). `--no-restore` skips state handling (and
+removes a stale state file).
+2026-09-05 review fixes: relaunch by bundle path instead of `open -a AeroSpace` — LaunchServices
+resolved the *name* to whichever registered copy it preferred (observed: the xcode build-products
+bundle, leaving the live server's binary exposed to the next build; the gotcha is obsolete now),
+and dropped `--config-path`/`--read-only`; the pid wait is bounded at 10 min and then gives up
+loudly into `restart-failed.log` instead of firing a no-op `open`; termination is delayed 1.5 s
+(was 300 ms) so the ServerAnswer, written only after the session's `layoutWorkspaces`, reaches
+the CLI — proper fix (terminate right after `answerToClient` in `server.swift`) is tagged
+`TODO(review-2026-09-05)` in `RestartCommand.swift`.
 
 ### 4. auto-split-by-aspect (config)
 `MacWindow.swift: unbindAndGetBindingDataForNewTilingWindow`.
@@ -155,6 +171,9 @@ Gotchas (all learned in production):
   shims `bash` via `which bash`; without Homebrew first it picks system bash 3.2, the sub-scripts
   die ("bash version is too old"), xcodegen never runs, and xcodebuild fails with
   "No certificate matching 'aerospace-codesign-certificate'" (2026-09-05).
+- **Relaunch by bundle path, never `open -a AeroSpace`**: LaunchServices resolves the *name* to any
+  registered copy and once picked `xcode/.xcode-build/.../AeroSpace.app`. `restart` uses
+  `Bundle.main.bundleURL` since 2026-09-05; a build-dir copy is harmless again.
 - **rm before cp** for the CLI: overwriting a signed binary in place gets later execs SIGKILLed
   by the kernel signature cache (exit 137).
 - **Binaries first, config second**: the live config auto-reloads into the running server, which
