@@ -20,6 +20,10 @@ struct WorkspaceDump: Codable, Sendable {
     var focused: Bool = false
     var root: NodeDump? = nil
     var floating: [NodeDump] = []
+    /// Windows macOS currently shows natively fullscreen (ids only, no weights).
+    var macosFullscreen: [NodeDump] = []
+    /// Windows of apps that are macOS-hidden (ids only, no weights).
+    var macosHidden: [NodeDump] = []
 }
 
 struct NodeDump: Codable, Sendable {
@@ -27,9 +31,12 @@ struct NodeDump: Codable, Sendable {
     var orientation: String? = nil // "h" | "v" (containers)
     var layout: String? = nil // "tiles" | "accordion" (containers)
     var weight: Double? = nil
+    var mru: Bool? = nil // true on the parent's most-recently-used child (accordion's expanded one)
     var children: [NodeDump]? = nil
     var id: UInt32? = nil // windows
     var app: String? = nil // windows, informational only
+    var fullscreen: Bool? = nil // windows: AeroSpace `fullscreen` state
+    var noOuterGapsInFullscreen: Bool? = nil // windows: `fullscreen --no-outer-gaps`
 }
 
 // Lenient decoding: the synthesized init treats defaulted non-optionals as
@@ -52,6 +59,8 @@ extension WorkspaceDump {
         focused = try c.decodeIfPresent(Bool.self, forKey: .focused) ?? false
         root = try c.decodeIfPresent(NodeDump.self, forKey: .root)
         floating = try c.decodeIfPresent([NodeDump].self, forKey: .floating) ?? []
+        macosFullscreen = try c.decodeIfPresent([NodeDump].self, forKey: .macosFullscreen) ?? []
+        macosHidden = try c.decodeIfPresent([NodeDump].self, forKey: .macosHidden) ?? []
     }
 }
 
@@ -65,8 +74,15 @@ extension WorkspaceDump {
         ws.monitorId = workspace.workspaceMonitor.monitorId_oneBased
         ws.visible = workspace.isVisible
         ws.focused = focus.workspace == workspace
-        ws.root = dumpNode(workspace.rootTilingContainer)
-        ws.floating = workspace.floatingWindows.map(dumpWindowNode)
+        ws.root = dumpNode(workspace.rootTilingContainer, isMru: false)
+        ws.floating = workspace.floatingWindows.map { dumpWindowNode($0, isMru: false) }
+        // Like FrozenWorkspace.macosUnconventionalWindows: without these, a
+        // natively fullscreen/hidden window gets re-detected on the startup
+        // workspace after a restart and surfaces there when it leaves that state.
+        ws.macosFullscreen = workspace.macOsNativeFullscreenWindowsContainer.children
+            .filterIsInstance(of: Window.self).map(dumpWindowIdNode)
+        ws.macosHidden = workspace.macOsNativeHiddenAppsWindowsContainer.children
+            .filterIsInstance(of: Window.self).map(dumpWindowIdNode)
         dump.workspaces.append(ws)
     }
     return dump
@@ -79,15 +95,17 @@ extension WorkspaceDump {
     return String(data: data, encoding: .utf8) ?? "{}"
 }
 
-@MainActor private func dumpNode(_ node: TreeNode) -> NodeDump {
+@MainActor private func dumpNode(_ node: TreeNode, isMru: Bool) -> NodeDump {
     switch node.nodeCases {
-        case .window(let w): return dumpWindowNode(w)
+        case .window(let w): return dumpWindowNode(w, isMru: isMru)
         case .tilingContainer(let c):
             var dump = NodeDump(type: "container")
             dump.orientation = c.orientation == .h ? "h" : "v"
             dump.layout = c.layout.rawValue
             dump.weight = weightOrNil(c)
-            dump.children = c.children.map(dumpNode)
+            dump.mru = isMru ? true : nil
+            let mruChild = c.mostRecentChild
+            dump.children = c.children.map { dumpNode($0, isMru: $0 === mruChild) }
             return dump
         case .workspace, .floatingWindowsContainer, .macosMinimizedWindowsContainer,
              .macosHiddenAppsWindowsContainer, .macosFullscreenWindowsContainer,
@@ -96,11 +114,19 @@ extension WorkspaceDump {
     }
 }
 
-@MainActor private func dumpWindowNode(_ window: Window) -> NodeDump {
+@MainActor private func dumpWindowNode(_ window: Window, isMru: Bool) -> NodeDump {
+    var dump = dumpWindowIdNode(window)
+    dump.weight = weightOrNil(window)
+    dump.mru = isMru ? true : nil
+    dump.fullscreen = window.isFullscreen ? true : nil
+    dump.noOuterGapsInFullscreen = window.noOuterGapsInFullscreen ? true : nil
+    return dump
+}
+
+@MainActor private func dumpWindowIdNode(_ window: Window) -> NodeDump {
     var dump = NodeDump(type: "window")
     dump.id = window.windowId
     dump.app = window.app.name
-    dump.weight = weightOrNil(window)
     return dump
 }
 
@@ -124,7 +150,14 @@ extension WorkspaceDump {
         }
     }
 
-    // 2) Tree rebuild per workspace.
+    // 2) Tree rebuild. Two passes: first every workspace binds what the dump
+    // gives it (bind() implicitly unbinds, so this pulls windows across
+    // workspaces), and only then are the windows nobody claimed re-tiled.
+    // Re-tiling per workspace inside the first pass ran auto-split-by-aspect
+    // against the freshly rebuilt tree of the *first* workspace for windows
+    // a later workspace was about to take, flipping single-child roots and
+    // leaving wrapper containers behind.
+    var orphans: [(window: Window, workspace: Workspace)] = []
     for wsDump in dump.workspaces {
         let workspace = Workspace.get(byName: wsDump.name)
         if let rootDump = wsDump.root {
@@ -132,19 +165,30 @@ extension WorkspaceDump {
             // it is an illegal child-parent relation (die). Skip such entries.
             guard rootDump.type == "container" else { continue }
             let prevRoot = workspace.rootTilingContainer
-            let orphans = prevRoot.allLeafWindowsRecursive
+            orphans += prevRoot.allLeafWindowsRecursive.map { ($0, workspace) }
             prevRoot.unbindFromParent()
             buildNode(rootDump, parent: workspace)
-            for window in orphans where !window.isBound {
-                try? await window.relayoutWindow(on: workspace, .nonCancellable, forceTile: true)
-            }
         }
-        // Floating windows were dumped but never loaded: after a restart they
-        // got re-detected as tiling on the startup workspace and force-tiled there.
         for floatingDump in wsDump.floating {
             guard let window = rebindableWindow(floatingDump) else { continue }
             window.bindAsFloatingWindow(to: workspace)
+            applyWindowFlags(window, floatingDump)
         }
+        for fsDump in wsDump.macosFullscreen {
+            guard let window = unconventionalWindow(fsDump),
+                  case .macosFullscreenWindowsContainer(let cur) = window.windowParentCases else { continue }
+            let target = workspace.macOsNativeFullscreenWindowsContainer
+            if cur !== target { window.bind(to: target, adaptiveWeight: WEIGHT_DOESNT_MATTER, index: INDEX_BIND_LAST) }
+        }
+        for hiddenDump in wsDump.macosHidden {
+            guard let window = unconventionalWindow(hiddenDump),
+                  case .macosHiddenAppsWindowsContainer(let cur) = window.windowParentCases else { continue }
+            let target = workspace.macOsNativeHiddenAppsWindowsContainer
+            if cur !== target { window.bind(to: target, adaptiveWeight: WEIGHT_DOESNT_MATTER, index: INDEX_BIND_LAST) }
+        }
+    }
+    for (window, workspace) in orphans where !window.isBound {
+        try? await window.relayoutWindow(on: workspace, .nonCancellable, forceTile: true)
     }
 
     // 3) Visible workspaces (focused last), then the focused window.
@@ -157,7 +201,10 @@ extension WorkspaceDump {
     }
 }
 
-@MainActor private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) {
+/// Binds the node described by `dump` under `parent`. Returns the bound node,
+/// or nil when the entry was skipped.
+@MainActor @discardableResult
+private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeNode? {
     switch dump.type {
         case "container":
             let orientation: Orientation = dump.orientation == "v" ? .v : .h
@@ -169,20 +216,28 @@ extension WorkspaceDump {
                 layout,
                 index: INDEX_BIND_LAST,
             )
-            for child in dump.children ?? [] {
-                buildNode(child, parent: container)
+            var mruChild: TreeNode? = nil
+            for childDump in dump.children ?? [] {
+                let child = buildNode(childDump, parent: container)
+                if childDump.mru == true, let child { mruChild = child }
             }
+            // Bottom-up: every child has settled its own MRU by now. Marking
+            // propagates to `parent` too, which the caller overrides in turn.
+            // Without this the last-bound child is MRU everywhere, so every
+            // accordion outside the focus chain expands its last child.
+            mruChild?.markAsMostRecentChild()
+            return container
         case "window":
-            guard !(parent is Workspace) else { return } // see loadTree
-            guard let window = rebindableWindow(dump) else { return }
-            // bind() implicitly unbinds first, so this also pulls windows
-            // from other workspaces.
+            guard !(parent is Workspace) else { return nil } // see loadTree
+            guard let window = rebindableWindow(dump) else { return nil }
             window.bind(
                 to: parent,
                 adaptiveWeight: dump.weight.map { CGFloat($0) } ?? WEIGHT_AUTO,
                 index: INDEX_BIND_LAST,
             )
-        default: return
+            applyWindowFlags(window, dump)
+            return window
+        default: return nil
     }
 }
 
@@ -200,6 +255,20 @@ extension WorkspaceDump {
         case .macosMinimizedWindowsContainer, .macosFullscreenWindowsContainer,
              .macosHiddenAppsWindowsContainer, .macosPopupWindowsContainer: nil
     }
+}
+
+/// The live window for a `macosFullscreen`/`macosHidden` entry, provided macOS
+/// still holds it in an unconventional state. A window that meanwhile returned
+/// to normal is left wherever it is now.
+@MainActor private func unconventionalWindow(_ dump: NodeDump) -> Window? {
+    guard let id = dump.id, let window = Window.get(byId: id) else { return nil }
+    guard case .macos = window.layoutReason else { return nil }
+    return window
+}
+
+@MainActor private func applyWindowFlags(_ window: Window, _ dump: NodeDump) {
+    window.isFullscreen = dump.fullscreen ?? false
+    window.noOuterGapsInFullscreen = dump.noOuterGapsInFullscreen ?? false
 }
 
 // ---------------------------------------------------------------- restart
