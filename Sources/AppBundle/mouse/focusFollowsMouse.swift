@@ -26,7 +26,16 @@ import AppKit
             try checkCancellation()
             // Ignores macOS menubar dropdown, but, unfortunately, it doesn't ignore non-native menu-like fake windows.
             // todo: It would be cool to somehow reuse isWindowHeuristic logic here
-            if await isAxWindowUnderMouse(location) == false { return }
+            switch await axWindowUnderMouse(location) {
+                case .notAWindow: return
+                // [FORK gmjain/AeroSpace] The cursor is over a macOS-native-fullscreen window, which
+                // lives on its own Space. The workspace tree only knows the windows *behind* that
+                // Space, so the lookup below would pick whichever tiled window sits under the cursor
+                // and focusing it makes macOS swap Spaces — every mouse twitch yanked the user out of
+                // fullscreen Telegram (2026-09-05). Native fullscreen owns focus; leave it alone.
+                case .window(nativeFullscreen: true): return
+                case nil, .window(nativeFullscreen: false): break
+            }
             try checkCancellation()
             let workspace = location.monitorApproximation.activeWorkspace
             var window: Window? = nil
@@ -52,13 +61,22 @@ import AppKit
     }
 }
 
+private enum AxUnderMouse: Equatable {
+    case notAWindow
+    case window(nativeFullscreen: Bool)
+}
+
+/// nil means the AX query itself failed; callers treat that as "unknown, proceed" (upstream behavior).
 @concurrent
-private nonisolated func isAxWindowUnderMouse(_ location: CGPoint) async -> Bool? {
+private nonisolated func axWindowUnderMouse(_ location: CGPoint) async -> AxUnderMouse? {
     let systemwide = AXUIElementCreateSystemWide()
     var element: AXUIElement?
     if unsafe AXUIElementCopyElementAtPosition(systemwide, Float(location.x), Float(location.y), &element) != .success {
         return nil
     }
     guard let element else { return nil }
-    return element.get(Ax.parentWindowRecursive) != nil || element.get(Ax.roleAttr) == kAXWindowRole
+    let window: AXUIElement? = element.get(Ax.parentWindowRecursive)
+        ?? (element.get(Ax.roleAttr) == kAXWindowRole ? element : nil)
+    guard let window else { return .notAWindow }
+    return .window(nativeFullscreen: window.get(Ax.isFullscreenAttr) == true)
 }
