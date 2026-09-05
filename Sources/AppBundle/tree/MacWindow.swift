@@ -20,8 +20,9 @@ final class MacWindow: Window {
         if let existing = allWindowsMap[windowId] { return existing }
         let rect = try await macApp.getAxRect(windowId, .cancellable)
         // [FORK gmjain/AeroSpace] spawn-intent: place the window where the
-        // user was after their last keybinding, immune to focus churn.
-        let intent = isStartup ? nil : consumeSpawnIntent(for: macApp)
+        // user was after their last keybinding, immune to focus churn. Peek
+        // only; consumed below once this is known to be a new tiling window.
+        let intent = isStartup ? nil : peekSpawnIntent(for: macApp)
         let data = try await unbindAndGetBindingDataForNewWindow(
             windowId,
             macApp,
@@ -40,6 +41,9 @@ final class MacWindow: Window {
         }
         let window = MacWindow(windowId, macApp, lastFloatingSize: rect?.size, parent: data.parent, adaptiveWeight: data.adaptiveWeight, index: data.index)
         allWindowsMap[windowId] = window
+        // [FORK gmjain/AeroSpace] the intent is spent only by a new TILING
+        // window (dialogs/popups don't count) that passed the duplicate check.
+        let placedByIntent = intent.map { data.parent is TilingContainer && consumeSpawnIntent($0) } ?? false
         // [FORK gmjain/AeroSpace] auto-split-by-aspect wrapped the MRU window to receive this
         // window. If the window does not stay there (on-window-detected moved or floated it, the
         // closed-windows cache restored it elsewhere), the wrapper would linger as a redundant
@@ -52,9 +56,14 @@ final class MacWindow: Window {
         }
         // [FORK gmjain/AeroSpace] an intent-placed window is what the user
         // asked for: focus it, even if churn moved focus meanwhile, and guard
-        // it against late same-app activation steals.
-        if intent != nil {
+        // it against late same-app activation steals. nativeFocus too: this
+        // runs inside a heavy refresh session, which never syncs AeroSpace
+        // focus back to macOS (only runLightSession does), so without it a
+        // window spawned while another app was frontmost would be "focused"
+        // for AeroSpace while keystrokes kept going to that other app.
+        if placedByIntent {
             _ = window.focusWindow()
+            window.nativeFocus()
             armSpawnFocusGuard(windowId)
         }
         return window

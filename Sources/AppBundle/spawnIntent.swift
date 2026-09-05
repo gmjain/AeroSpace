@@ -8,7 +8,7 @@ import Foundation
 // wherever async focus churn (app activation, focus-follows-mouse) points at
 // detection time. In-process replacement for the external placement daemon.
 
-struct SpawnIntent: Sendable {
+struct SpawnIntent: Sendable, Equatable {
     let windowId: UInt32?
     let workspaceName: String
     let at: Date
@@ -28,16 +28,28 @@ struct SpawnIntent: Sendable {
     )
 }
 
-/// Consumes the intent if it is fresh and the app is configured. One intent
-/// serves at most one window.
-@MainActor func consumeSpawnIntent(for app: any AbstractApp) -> SpawnIntent? {
+/// Returns the pending intent if it is fresh and the app is configured, WITHOUT
+/// consuming it. Window detection peeks before its async AX calls (the anchor
+/// and workspace are needed to compute the binding) and consumes only once the
+/// window turned out to be a real new tiling window — a dialog, a popup, or a
+/// duplicate registration must not eat the one-shot intent.
+@MainActor func peekSpawnIntent(for app: any AbstractApp) -> SpawnIntent? {
     guard let intent = _spawnIntent,
           let bundleId = app.rawAppBundleId,
           config.spawnIntentApps.contains(bundleId),
           Date().timeIntervalSince(intent.at) < Double(config.spawnIntentTimeoutMs) / 1000
     else { return nil }
-    _spawnIntent = nil
     return intent
+}
+
+/// One intent serves at most one window. Returns false (and leaves the pending
+/// intent alone) if a newer intent was recorded since `intent` was peeked: the
+/// user acted again meanwhile, so the window placed from the stale intent must
+/// not drag focus back to it.
+@MainActor func consumeSpawnIntent(_ intent: SpawnIntent) -> Bool {
+    guard _spawnIntent == intent else { return false }
+    _spawnIntent = nil
+    return true
 }
 
 // ------------------------------------------------------- focus guard
