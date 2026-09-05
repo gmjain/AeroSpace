@@ -71,6 +71,15 @@ app snaps back.
 focus acceptance/rejection, tagged with the refresh session event. This is how #6's root cause
 was caught red-handed within seconds of enabling it.
 
+### 9. focus-follows-mouse: ignore macOS-native-fullscreen windows (2026-09-05)
+`Sources/AppBundle/mouse/focusFollowsMouse.swift` — `axWindowUnderMouse` now reads `AXFullScreen`
+on the AX window under the cursor and bails when true. A native-fullscreen window lives on its own
+Space; the workspace tree only knows the windows *behind* it, so upstream FFM focused whichever
+tiled window sat under the cursor and macOS swapped Spaces back — every mouse move yanked the
+user out of fullscreen Telegram. Companion config: `on-window-detected` rule for
+`ru.keepcoder.Telegram` (`macos-native-fullscreen off`, `layout tiling`, ws 9), since Telegram
+restores its own fullscreen state across launches.
+
 ## Build & deploy recipe
 
 ```sh
