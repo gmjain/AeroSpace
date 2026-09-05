@@ -103,6 +103,10 @@ aerospace restart   # fork command: layouts survive
 ```
 
 Gotchas (all learned in production):
+- **`git branch --show-current` must print `main` before building.** 2026-09-05: a session
+  inherited a checkout parked on `user-intent-clock`, committed there, and deployed fork.8 with the
+  rolled-back intent clock inside for ~10 min. Fix was: feature branch off main, cherry-pick,
+  ff-merge, rebuild. Never trust HEAD.
 - **`/opt/homebrew/bin` must be on PATH** before `generate.sh`: `script/setup.sh` nukes PATH and
   shims `bash` via `which bash`; without Homebrew first it picks system bash 3.2, the sub-scripts
   die ("bash version is too old"), xcodegen never runs, and xcodebuild fails with
