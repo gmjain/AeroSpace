@@ -206,6 +206,12 @@ Gotchas (all learned in production):
   (session tags on REJECTED lines) will show whether session-event discrimination
   (didActivateApplication vs bare AXFocusedWindowChanged) is reliable enough to skip the input
   monitors entirely.
+  **2026-09-05 review data says no:** WezTerm steals arrive as `didActivateApplication` too (26 of
+  361), ~1 ms *before* their `ax(AXFocusedWindowChanged)` twin, so "reject only .ax sessions" would
+  accept the steal. Chrome rejections (955) were 80% one window re-rejected every session — the
+  push-back no-op fixed in §6 — not independent steals. Cost of keeping Chrome in the list: link
+  clicks / cmd-tab into a Chrome window on a hidden ws snap back. Candidate patch (cross-app
+  activation + no hotkey in last 2 s), NOT applied: `focus-steal-guard-proposal.diff`.
 - Upstream PR for #1 (FFM re-raise guard), referencing discussion #2177.
 - Possibly upstream dump-tree/load-tree (#2173 and #57 are circling layout persistence).
 - Disable fork-debug-log once the alt-l/ws4 steal is confirmed dead in daily use.
