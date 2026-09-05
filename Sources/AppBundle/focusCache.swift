@@ -21,11 +21,26 @@ import Common
         // keystrokes keep going to the real focused window.
         if let nativeFocused,
            config.focusStealGuardApps.contains(nativeFocused.app.rawAppBundleId ?? ""),
-           let targetWs = nativeFocused.nodeWorkspace, !targetWs.isVisible {
-            forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(nativeFocused)) "
-                + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
-            focus.windowOrNil?.nativeFocus()
-            return
+           let targetWs = nativeFocused.nodeWorkspace, !targetWs.isVisible
+        {
+            if let pushBackTo = focus.windowOrNil {
+                forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(nativeFocused)) "
+                    + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
+                // Record what macOS actually focused before pushing back. MacApp.nativeFocus skips the
+                // AX raise and only calls nsApp.activate when it believes the target is already the app's
+                // focused window (single monitor). For a same-app steal (Chrome cmd-` onto a hidden
+                // window) the app is already active, so that shortcut was a no-op and macOS stayed on
+                // the hidden window while every following refresh session re-rejected it (2026-09-05).
+                nativeFocused.macAppUnsafe.lastNativeFocusedWindowId = nativeFocused.windowId
+                pushBackTo.nativeFocus()
+                return
+            }
+            // Nothing to push macOS back to (focused workspace is empty): rejecting would leave the
+            // guarded app frontmost with its window parked off-screen and keystrokes going nowhere
+            // visible. Accept the native focus instead (2026-09-05).
+            forkDebugLog("updateFocusCache: ACCEPTED hidden-ws focus by \(forkDebugDescribe(nativeFocused)) "
+                + "(focused ws \(focus.workspace.name) is empty, nothing to push back to; "
+                + "session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
         }
         // [FORK gmjain/AeroSpace] the moment macOS-side focus changes get
         // accepted — the usual culprit when workspaces flip "by themselves".
