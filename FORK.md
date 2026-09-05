@@ -26,6 +26,10 @@ same way in `~/git/config/aerospace/aerospace.toml`.
 Upstream FFM re-raises the window under the mouse on every move; the AX raise dismisses the app's
 own popup windows (Chrome extension dropdowns, menubar-app panels). Related: upstream discussion
 #2177. **Best upstream-PR candidate.**
+2026-09-05 review fixes: the skip now requires macOS to agree (`isNativeFocused(window)`, fed by
+`updateFocusCache`'s last-seen native window). Before, a desktop/gap click (Finder) or a Dock click
+on an app with only minimized windows left AeroSpace's focus on X while macOS was elsewhere, and
+hovering X never restored it. Popups still survive: the popup early-return never updates the cache.
 
 ### 2. dump-tree / load-tree commands
 `Sources/AppBundle/tree/treeDump.swift`, `DumpTreeCommand`, `LoadTreeCommand`.
@@ -87,12 +91,23 @@ targets the monitor's *active* workspace). For listed apps, native focus pointin
 a **non-visible** workspace is rejected and macOS is pushed back. Safe because genuine user
 interactions (click/FFM) always target visible windows. Known cost: cmd-tab to a hidden listed
 app snaps back.
+2026-09-05 review fixes: (a) the push-back records the stolen window as the app's native-focused one
+first, so `MacApp.nativeFocus` takes the AX raise path — on one monitor the activate-only shortcut
+was a no-op for same-app steals (Chrome cmd-` onto a hidden window), macOS stayed on the hidden
+window and every refresh session re-rejected it (one Chrome window: 764 REJECTED lines);
+(b) when the focused workspace is empty there is nothing to push back to, so the native focus is
+accepted (logged as ACCEPTED) instead of leaving the guarded app frontmost with its window parked
+off-screen.
 
 ### 7. fork-debug-log (config)
 `Sources/AppBundle/forkDebugLog.swift`. Opt-in tracing to
 `~/.local/state/aerospace/fork-debug.log`: every monitor active-workspace change and every native
 focus acceptance/rejection, tagged with the refresh session event. This is how #6's root cause
 was caught red-handed within seconds of enabling it.
+2026-09-05 review fixes: throwing `write(contentsOf:)` (the legacy `write(_:)` raises an uncatchable
+ObjC exception on ENOSPC/EBADF and would abort the WM), handle dropped on write failure,
+`syncForkDebugLog(config)` on reload closes it when disabled / when the file was deleted, and the
+`DateFormatter` is built once.
 
 ### 9. focus-follows-mouse: ignore macOS-native-fullscreen windows (2026-09-05)
 `Sources/AppBundle/mouse/focusFollowsMouse.swift` — `axWindowUnderMouse` now reads `AXFullScreen`
@@ -102,6 +117,12 @@ tiled window sat under the cursor and macOS swapped Spaces back — every mouse 
 user out of fullscreen Telegram. Companion config: `on-window-detected` rule for
 `ru.keepcoder.Telegram` (`macos-native-fullscreen off`, `layout tiling`, ws 9), since Telegram
 restores its own fullscreen state across launches.
+2026-09-05 review fixes: `axWindowUnderMouse` also returns the window's pid + CGWindowID. FFM now bails
+when the AXFullScreen read failed (unknown ≠ false; "attribute unsupported" still counts as false),
+and when the window under the cursor belongs to an app that owns a native-fullscreen window unless it
+is one of that app's ordinary tiled/floating windows (child popovers/menus of fullscreen Telegram
+report AXFullScreen == false themselves and used to fall through). Known gap: other apps' windows
+drawn over the fullscreen Space (Notification Center banners) still fall through.
 
 ## Build & deploy recipe
 
