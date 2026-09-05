@@ -51,7 +51,12 @@ import AppKit
             if window == nil {
                 window = location.findWindowRecursively(in: workspace.rootTilingContainer, virtual: false, fullscreenCoversAll: true)
             }
-            if let window, window != focus.windowOrNil {
+            // [FORK gmjain/AeroSpace] Skip the re-raise only when AeroSpace AND macOS already agree that
+            // `window` is focused (the raise dismisses the app's own popups, e.g. Chrome extension
+            // dropdowns — popups never update the native focus cache, so this keeps them alive). When
+            // macOS moved focus elsewhere without AeroSpace adopting it (click on the desktop/gap ->
+            // Finder, Dock click on an app with only minimized windows) hovering must still restore it.
+            if let window, window != focus.windowOrNil || !isNativeFocused(window) {
                 try await runLightSession(.focusFollowsMouse, token) {
                     _ = window.focusWindow()
                     window.nativeFocus()

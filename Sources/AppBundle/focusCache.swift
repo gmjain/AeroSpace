@@ -2,6 +2,13 @@ import Common
 
 @MainActor private var lastKnownNativeFocusedWindowId: UInt32? = nil
 
+/// [FORK gmjain/AeroSpace] True when macOS, as last observed by updateFocusCache, has `window` as
+/// its focused window. Lets focus-follows-mouse skip the re-raise only when AeroSpace and macOS
+/// agree on the focus (fork feature #1), instead of whenever AeroSpace alone thinks so.
+@MainActor func isNativeFocused(_ window: Window) -> Bool {
+    lastKnownNativeFocusedWindowId == window.windowId
+}
+
 /// The data should flow (from nativeFocused to focused) and
 ///                      (from nativeFocused to lastKnownNativeFocusedWindowId)
 /// Alternative names: takeFocusFromMacOs, syncFocusFromMacOs
