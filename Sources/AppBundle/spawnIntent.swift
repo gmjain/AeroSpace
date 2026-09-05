@@ -11,7 +11,7 @@ import Foundation
 struct SpawnIntent: Sendable, Equatable {
     let windowId: UInt32?
     let workspaceName: String
-    let at: Date
+    let at: ContinuousClock.Instant // monotonic: immune to wall-clock jumps (NTP, sleep)
 }
 
 @MainActor private var _spawnIntent: SpawnIntent? = nil
@@ -24,7 +24,7 @@ struct SpawnIntent: Sendable, Equatable {
     _spawnIntent = SpawnIntent(
         windowId: focus.windowOrNil?.windowId,
         workspaceName: focus.workspace.name,
-        at: Date(),
+        at: .now,
     )
 }
 
@@ -37,7 +37,7 @@ struct SpawnIntent: Sendable, Equatable {
     guard let intent = _spawnIntent,
           let bundleId = app.rawAppBundleId,
           config.spawnIntentApps.contains(bundleId),
-          Date().timeIntervalSince(intent.at) < Double(config.spawnIntentTimeoutMs) / 1000
+          ContinuousClock.now - intent.at < .milliseconds(config.spawnIntentTimeoutMs)
     else { return nil }
     return intent
 }
@@ -61,14 +61,14 @@ struct SpawnIntent: Sendable, Equatable {
 
 private struct FocusGuard {
     let windowId: UInt32
-    let until: Date
+    let until: ContinuousClock.Instant
     var refires: Int
 }
 
 @MainActor private var _focusGuard: FocusGuard? = nil
 
 @MainActor func armSpawnFocusGuard(_ windowId: UInt32) {
-    _focusGuard = FocusGuard(windowId: windowId, until: Date().addingTimeInterval(2), refires: 0)
+    _focusGuard = FocusGuard(windowId: windowId, until: .now + .seconds(2), refires: 0)
 }
 
 @MainActor func clearSpawnFocusGuard() {
@@ -79,7 +79,7 @@ private struct FocusGuard {
 /// rejected (macOS focus pushed back to the guarded window).
 @MainActor func rejectStolenNativeFocus(_ nativeFocused: Window?) -> Bool {
     guard var guard_ = _focusGuard else { return false }
-    if Date() > guard_.until || guard_.refires >= 3 {
+    if ContinuousClock.now > guard_.until || guard_.refires >= 3 {
         _focusGuard = nil
         return false
     }
