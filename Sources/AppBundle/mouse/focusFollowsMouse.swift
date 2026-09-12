@@ -2,6 +2,12 @@ import AppKit
 
 @MainActor private var focusFollowsMouseMonitor: Any? = nil
 @MainActor private var focusFollowsTask: Task<(), any Error>? = nil
+/// [FORK gmjain/AeroSpace] The last window FFM raised and what macOS was reporting as focused when
+/// it did. FFM raises again only when that observation changes (macOS confirmed something else, e.g.
+/// Finder after a desktop click), never merely because macOS has not answered yet: re-raising on
+/// every mouse move while a slow app (Chrome under load) was still processing the first make-main +
+/// raise queued dozens of AX actions on its UI thread and made it slower still (2026-09-12).
+@MainActor private var ffmLastRaise: (windowId: UInt32, observation: UInt32?)? = nil
 
 @MainActor func syncFocusFollowsMouse(_ config: Config) {
     if config.focusFollowsMouse.enabled == (focusFollowsMouseMonitor != nil) {
@@ -26,7 +32,10 @@ import AppKit
             try checkCancellation()
             // Ignores macOS menubar dropdown, but, unfortunately, it doesn't ignore non-native menu-like fake windows.
             // todo: It would be cool to somehow reuse isWindowHeuristic logic here
-            switch await axWindowUnderMouse(location) {
+            // Windows AeroSpace already tiles/floats cannot be native fullscreen (those live in the
+            // fullscreen container), so the AXFullScreen round trip is skipped for them.
+            let ordinaryManaged = ordinaryManagedWindowIds()
+            switch await axWindowUnderMouse(location, ordinaryManaged: ordinaryManaged) {
                 case nil: break // the AX query itself failed: unknown, proceed (upstream behavior)
                 case .notAWindow: return
                 case .window(nativeFullscreen: let nativeFullscreen, pid: let pid, windowId: let windowId):
@@ -67,10 +76,19 @@ import AppKit
             // dropdowns — popups never update the native focus cache, so this keeps them alive). When
             // macOS moved focus elsewhere without AeroSpace adopting it (click on the desktop/gap ->
             // Finder, Dock click on an app with only minimized windows) hovering must still restore it.
-            if let window, window != focus.windowOrNil || !isNativeFocused(window) {
-                try await runLightSession(.focusFollowsMouse, token) {
-                    _ = window.focusWindow()
-                    window.nativeFocus()
+            if let window {
+                let transition = window != focus.windowOrNil
+                let macosDisagrees = !isNativeFocused(window)
+                let raisedForThisObservation = ffmLastRaise.map {
+                    $0.windowId == window.windowId && $0.observation == nativeFocusObservation
+                } ?? false
+                if transition || (macosDisagrees && !raisedForThisObservation) {
+                    try await runLightSession(.focusFollowsMouse, token) {
+                        _ = window.focusWindow()
+                        window.nativeFocus()
+                    }
+                    // Recorded after the session: its updateFocusCache may have refreshed the observation.
+                    ffmLastRaise = (window.windowId, nativeFocusObservation)
                 }
             }
         }
@@ -90,6 +108,11 @@ import AppKit
     return window.parent is TilingContainer || window.parent is FloatingWindowsContainer
 }
 
+/// [FORK gmjain/AeroSpace] Ids of every window AeroSpace currently tiles or floats (any workspace).
+@MainActor private func ordinaryManagedWindowIds() -> Set<CGWindowID> {
+    Set(MacWindow.allWindows.lazy.filter { $0.parent is TilingContainer || $0.parent is FloatingWindowsContainer }.map(\.windowId))
+}
+
 private enum AxUnderMouse: Equatable {
     case notAWindow
     /// nativeFullscreen: nil means the AXFullScreen read failed (the app did not answer).
@@ -99,7 +122,7 @@ private enum AxUnderMouse: Equatable {
 
 /// nil means the AX query itself failed; callers treat that as "unknown, proceed" (upstream behavior).
 @concurrent
-private nonisolated func axWindowUnderMouse(_ location: CGPoint) async -> AxUnderMouse? {
+private nonisolated func axWindowUnderMouse(_ location: CGPoint, ordinaryManaged: Set<CGWindowID>) async -> AxUnderMouse? {
     let systemwide = AXUIElementCreateSystemWide()
     var element: AXUIElement?
     if unsafe AXUIElementCopyElementAtPosition(systemwide, Float(location.x), Float(location.y), &element) != .success {
@@ -111,7 +134,10 @@ private nonisolated func axWindowUnderMouse(_ location: CGPoint) async -> AxUnde
     guard let window else { return .notAWindow }
     var pid: pid_t = 0
     let pidOrNil: pid_t? = unsafe AXUIElementGetPid(window, &pid) == .success ? pid : nil
-    return .window(nativeFullscreen: readNativeFullscreen(window), pid: pidOrNil, windowId: window.containingWindowId())
+    let windowId = window.containingWindowId() // no IPC: the id is decoded from the element token
+    // A window AeroSpace tiles or floats is on a normal workspace by construction: skip the AX read.
+    let nativeFullscreen: Bool? = windowId.map { ordinaryManaged.contains($0) } == true ? false : readNativeFullscreen(window)
+    return .window(nativeFullscreen: nativeFullscreen, pid: pidOrNil, windowId: windowId)
 }
 
 /// Three-state AXFullScreen read. `false` includes "attribute unsupported" (the window cannot be native
