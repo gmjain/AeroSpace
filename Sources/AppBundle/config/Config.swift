@@ -52,6 +52,9 @@ struct Config: ConvenienceMutable {
     // like WezTerm self-activate in the background and silently flip the
     // active workspace)
     var focusStealGuardApps: [String] = []
+    // [FORK gmjain/AeroSpace] app-switching chords whose modifier RELEASE grants a user-input
+    // token to the event-order focus guard (see userInput.swift). Parsed manually after key-mapping.
+    var focusGrantChords: [FocusGrantChord] = FocusGrantChord.defaults
     var _nonEmptyWorkspacesRootContainersLayoutOnStartup: Void = ()
     var defaultRootContainerLayout: Layout = .tiles
     var defaultRootContainerOrientation: DefaultContainerOrientation = .auto

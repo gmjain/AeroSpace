@@ -32,6 +32,11 @@ extension HotKey {
         hotkeys[binding.descriptionWithKeyCode] = HotKey(key: binding.keyCode, modifiers: binding.modifiers, keyDownHandler: {
             Task.startUnstructured {
                 if let activeMode {
+                    // [FORK gmjain/AeroSpace] a hotkey is the user acting: it spends any pending
+                    // input token (the hotkey's effects are AeroSpace's own, not a native focus
+                    // change to honor) and supersedes whatever AeroSpace asked macOS for before.
+                    consumeUserInputToken(by: "hotkey")
+                    clearPendingOwnFocus()
                     broadcastEvent(.bindingTriggered(
                         mode: activeMode,
                         binding: binding.descriptionWithKeyNotation,

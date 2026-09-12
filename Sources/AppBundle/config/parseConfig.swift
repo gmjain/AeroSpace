@@ -120,6 +120,7 @@ struct Parser<S: ConvenienceMutable, T>: ParserProtocol {
 private let keyMappingConfigRootKey = "key-mapping"
 private let configVersionConfigRootKey = "config-version"
 private let modeConfigRootKey = "mode"
+private let focusGrantChordsKey = "focus-grant-chords" // [FORK gmjain/AeroSpace]
 private let persistentWorkspacesKey = "persistent-workspaces"
 
 // For every new config option you add, think:
@@ -142,6 +143,7 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "spawn-intent-timeout-ms": Parser(\.spawnIntentTimeoutMs, parseSpawnIntentTimeoutMs), // [FORK gmjain/AeroSpace]
     "fork-debug-log": Parser(\.forkDebugLog, parseBool), // [FORK gmjain/AeroSpace]
     "focus-steal-guard-apps": Parser(\.focusStealGuardApps, parseArrayOfStrings), // [FORK gmjain/AeroSpace]
+    focusGrantChordsKey: Parser(\.focusGrantChords, skipParsing(Config().focusGrantChords)), // [FORK gmjain/AeroSpace] Parsed manually
     "enable-normalization-opposite-orientation-for-nested-containers": Parser(\.enableNormalizationOppositeOrientationForNestedContainers, parseBool),
 
     "default-root-container-layout": Parser(\.defaultRootContainerLayout, parseLayout),
@@ -276,6 +278,11 @@ struct ParseConfigResult {
     // Parse modeConfigRootKey after keyMappingConfigRootKey
     if let modes = rawTable[modeConfigRootKey].flatMap({ parseModes($0, .rootKey(modeConfigRootKey), &c, config.keyMapping.resolve()) }) {
         config.modes = modes
+    }
+    // [FORK gmjain/AeroSpace] chords use the same key notation as bindings, so also after key-mapping
+    if let raw = rawTable[focusGrantChordsKey] {
+        config.focusGrantChords = parseFocusGrantChords(raw, .rootKey(focusGrantChordsKey), config.keyMapping.resolve())
+            .getOrNil(appendErrorTo: &c.errors) ?? []
     }
 
     if config.configVersion <= ._1 {
@@ -413,6 +420,24 @@ private func parseSpawnIntentTimeoutMs(_ raw: OrderedJson, _ backtrace: ConfigBa
     parseInt(raw, backtrace).flatMap {
         $0 > 0 ? .success($0) : .failure(.init(backtrace, "spawn-intent-timeout-ms must be positive, got \($0)"))
     }
+}
+
+// [FORK gmjain/AeroSpace] focus-grant-chords: hotkey notation ('cmd-tab', 'ctrl-space'), at least one
+// modifier — the token is granted on the modifier's release, a bare key would fire on plain typing.
+func parseFocusGrantChords(_ raw: OrderedJson, _ backtrace: ConfigBacktrace, _ mapping: [String: Key]) -> ResOrConfigParseDiagnostic<[FocusGrantChord]> {
+    parseTomlArray(raw, backtrace)
+        .flatMap { arr in
+            arr.enumerated().mapAllOrFailure { (index, elem) -> ResOrConfigParseDiagnostic<FocusGrantChord> in
+                let backtrace = backtrace + .index(index)
+                return parseString(elem, backtrace).flatMap { notation in
+                    parseBinding(notation, backtrace, mapping).flatMap { modifiers, key in
+                        modifiers.isEmpty
+                            ? .failure(.init(backtrace, "'\(notation)': a focus-grant chord needs at least one modifier"))
+                            : .success(FocusGrantChord(modifiers: modifiers, key: key, notation: notation))
+                    }
+                }
+            }
+        }
 }
 
 private func parseArrayOfStrings(_ raw: OrderedJson, _ backtrace: ConfigBacktrace) -> ResOrConfigParseDiagnostic<[String]> {
