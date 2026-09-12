@@ -132,7 +132,7 @@ accepted every unlisted app (regression cases below).
 
 **Model.** The decision is made by *event order*, never by elapsed time: no `Date`/clock comparison
 anywhere in it (the 2 s variants — the spawn guard expiry and the parked
-`focus-steal-guard-proposal.diff` — were the failed timing-based attempts; see History). Two facts:
+the dropped timing-based proposal — were the failed timing-based attempts; see History). Two facts:
 - `pendingOwnFocus` — the window AeroSpace last asked macOS to focus and has not yet seen reported
   back. `MacWindow.nativeFocus()` is the single choke point (light sessions' `focusAfter`, FFM,
   spawn-intent placement, the guard push-backs, `garbageCollect`'s dead-window focus). Cleared by
@@ -217,7 +217,7 @@ native focus is accepted instead of leaving the guarded app frontmost with its w
 off-screen. 2026-09-05 review data on session-event discrimination: WezTerm steals arrive as
 `didActivateApplication` too (26 of 361), ~1 ms before their `ax(AXFocusedWindowChanged)` twin, so
 "reject only .ax sessions" would accept the steal; Chrome rejections (955) were 80% one window
-re-rejected every session (fix (a)). The parked `focus-steal-guard-proposal.diff` (cross-app
+re-rejected every session (fix (a)). The dropped timing-based proposal (cross-app
 activation + no hotkey in the last 2 s) and the "user-intent clock" idea (accept within ~1 s of a
 deliberate action) were both clock-based and are superseded by this model; the diff is kept only as
 a record of what not to do.
