@@ -19,6 +19,7 @@ import Foundation
 
         startUnixSocketServer()
         GlobalObserver.initObserver()
+        initUserInputMonitor() // [FORK gmjain/AeroSpace] event-order focus guard input monitors
         Workspace.garbageCollectUnusedWorkspaces() // init workspaces
         _ = Workspace.all.first?.focusWorkspace()
         await runHeavyCompleteRefreshSession(
