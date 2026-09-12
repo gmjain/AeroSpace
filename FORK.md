@@ -36,6 +36,13 @@ activate path) queued dozens of AX actions and made Chrome slower to confirm —
 as "FFM lag between two Chrome windows". Now: one raise per distinct native-focus observation
 (`ffmLastRaise`), runLightSession skips its sync raise when the body already asked for that window
 (`ownFocusRequestSeq`), and the AXFullScreen read is skipped for windows AeroSpace already manages.
+2026-09-12, root cause found and the rest unwound: the slowness was a **Chrome instance up for 19
+days** answering every AX request in 200-350 ms (fork.12 trace: per hover, ~40 queued
+`AXUIElementCopyElementAtPosition` / `AXFocusedWindow` / raise calls released as one burst); after a
+Chrome update the same requests take 7-17 ms. A window-server hit test that bypassed AX (fork.13)
+was reverted as unneeded. Diagnose next time with
+`osascript -l JavaScript ~/git/config/aerospace/scripts/ax-latency-probe.js` (in-process timing of
+AX reads/raises per app; >50 ms means the app, not the WM).
 
 ### 2. dump-tree / load-tree commands
 `Sources/AppBundle/tree/treeDump.swift`, `DumpTreeCommand`, `LoadTreeCommand`.
