@@ -30,12 +30,25 @@ import AppKit
         focusFollowsTask = Task.startUnstructured { @MainActor in
             guard let token: RunSessionGuard = .isServerEnabled else { return }
             try checkCancellation()
+            // [FORK gmjain/AeroSpace] phase timing for fork-debug-log (only hovers slower than 25 ms).
+            let t0 = ContinuousClock.now
+            var tAx: Duration = .zero, tRects: Duration = .zero, tSession: Duration = .zero
+            var outcome = "skip"
+            defer {
+                let total = ContinuousClock.now - t0
+                if config.forkDebugLog, total > .milliseconds(25) {
+                    forkDebugLog("ffm: \(outcome) total=\(total.ms)ms ax=\(tAx.ms)ms rects=\(tRects.ms)ms session=\(tSession.ms)ms")
+                }
+            }
             // Ignores macOS menubar dropdown, but, unfortunately, it doesn't ignore non-native menu-like fake windows.
             // todo: It would be cool to somehow reuse isWindowHeuristic logic here
             // Windows AeroSpace already tiles/floats cannot be native fullscreen (those live in the
             // fullscreen container), so the AXFullScreen round trip is skipped for them.
             let ordinaryManaged = ordinaryManagedWindowIds()
-            switch await axWindowUnderMouse(location, ordinaryManaged: ordinaryManaged) {
+            let axStart = ContinuousClock.now
+            let underMouse = await axWindowUnderMouse(location, ordinaryManaged: ordinaryManaged)
+            tAx = ContinuousClock.now - axStart
+            switch underMouse {
                 case nil: break // the AX query itself failed: unknown, proceed (upstream behavior)
                 case .notAWindow: return
                 case .window(nativeFullscreen: let nativeFullscreen, pid: let pid, windowId: let windowId):
@@ -59,6 +72,7 @@ import AppKit
             try checkCancellation()
             let workspace = location.monitorApproximation.activeWorkspace
             var window: Window? = nil
+            let rectsStart = ContinuousClock.now
             for child in workspace.floatingWindowsContainer.mruChildren {
                 try checkCancellation()
                 guard let child = child as? Window else { continue }
@@ -68,6 +82,7 @@ import AppKit
                     break
                 }
             }
+            tRects = ContinuousClock.now - rectsStart
             if window == nil {
                 window = location.findWindowRecursively(in: workspace.rootTilingContainer, virtual: false, fullscreenCoversAll: true)
             }
@@ -83,10 +98,13 @@ import AppKit
                     $0.windowId == window.windowId && $0.observation == nativeFocusObservation
                 } ?? false
                 if transition || (macosDisagrees && !raisedForThisObservation) {
+                    outcome = (transition ? "raise-transition" : "raise-disagree") + " -> \(forkDebugDescribe(window))"
+                    let sessionStart = ContinuousClock.now
                     try await runLightSession(.focusFollowsMouse, token) {
                         _ = window.focusWindow()
                         window.nativeFocus()
                     }
+                    tSession = ContinuousClock.now - sessionStart
                     // Recorded after the session: its updateFocusCache may have refreshed the observation.
                     ffmLastRaise = (window.windowId, nativeFocusObservation)
                 }
@@ -150,4 +168,9 @@ private nonisolated func readNativeFullscreen(_ window: AXUIElement) -> Bool? {
         case .attributeUnsupported, .noValue, .notImplemented: false
         default: nil
     }
+}
+
+private extension Duration {
+    /// Whole milliseconds, for log lines.
+    var ms: Int64 { components.seconds * 1000 + components.attoseconds / 1_000_000_000_000_000 }
 }
