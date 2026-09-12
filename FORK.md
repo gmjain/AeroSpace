@@ -82,8 +82,11 @@ cascades through all ancestors when opposite-orientation normalization is on.
 After every hotkey binding executes, remember (focused window, workspace). A new window of a
 listed app appearing within the timeout is born on that workspace, anchored to that window
 (auto-split applies), and focused — immune to the detection-time focus race (upstream #1097),
-LaunchServices activation churn, and FFM MRU pollution. Includes a 2s post-placement focus guard
-(`armSpawnFocusGuard`) against late same-app activation steals.
+LaunchServices activation churn, and FFM MRU pollution. Includes a post-placement focus guard
+(`armSpawnFocusGuard`) against late same-app activation steals; since 2026-09-12 its lifetime is
+event-ordered (see §6): it ends when macOS confirms the placed window, a hotkey or physical input
+arrives, another app takes focus, AeroSpace itself picked the reported window, or after 3 refires.
+The 2 s `ContinuousClock` expiry is gone.
 
 2026-09-05 review fixes: (a) the intent is *peeked* before the async AX calls and consumed only
 once the window is registered with a tiling parent — dialogs, popups and duplicate registrations
@@ -96,24 +99,115 @@ rejecting it had left AeroSpace and macOS focus on different windows with no re-
 `alt-h/j/k/l` → `exec-and-forget aero-edge-switch` → `aerospace focus` moved focus *after* the
 hotkey recorded it, leaving a 5 s stale anchor. Causal only (the command changed focus), no
 timing heuristics. (e) `spawn-intent-timeout-ms <= 0` is a config error (it silently disabled
-the feature); intent/guard timestamps use `ContinuousClock` (monotonic) instead of `Date`.
+the feature); the intent timestamp uses `ContinuousClock` (monotonic) instead of `Date` (the guard
+had one too until 2026-09-12).
 
-### 6. focus-steal-guard-apps (config)
-`Sources/AppBundle/focusCache.swift: updateFocusCache`.
-Multi-instance apps (WezTerm runs one process per window) fire `AXFocusedWindowChanged` from
-background instances; upstream accepts every native focus event, silently flipping the active
-workspace (symptom: `focus right` across monitors lands on the wrong workspace, because it
-targets the monitor's *active* workspace). For listed apps, native focus pointing at a window on
-a **non-visible** workspace is rejected and macOS is pushed back. Safe because genuine user
-interactions (click/FFM) always target visible windows. Known cost: cmd-tab to a hidden listed
-app snaps back.
-2026-09-05 review fixes: (a) the push-back records the stolen window as the app's native-focused one
-first, so `MacApp.nativeFocus` takes the AX raise path — on one monitor the activate-only shortcut
-was a no-op for same-app steals (Chrome cmd-` onto a hidden window), macOS stayed on the hidden
-window and every refresh session re-rejected it (one Chrome window: 764 REJECTED lines);
-(b) when the focused workspace is empty there is nothing to push back to, so the native focus is
-accepted (logged as ACCEPTED) instead of leaving the guarded app frontmost with its window parked
-off-screen.
+### 6. Event-order focus guard (config: focus-steal-guard-apps, focus-grant-chords)
+`Sources/AppBundle/focusCache.swift: updateFocusCache` + `Sources/AppBundle/userInput.swift`
+(built 2026-09-12 on branch `event-order-guard`, goes out with the next release build; supersedes
+the app-list-only guard below).
+
+**Problem.** macOS reports a native focus change onto a window on a *hidden* workspace both for
+things the user did (cmd-tab, Dock click, Spotlight/Raycast launch, a link clicked in another app, a
+notification click) and for things a machine did: a background WezTerm instance re-keying ~50-700 ms
+after alt-enter, Chrome/Claude re-keying a hidden window right after one of their windows closed,
+WhatsApp re-keying itself with nobody at the keyboard, and macOS answering an AeroSpace focus
+request with the *previous* window. Accepting a machine one flips the active workspace "by itself";
+rejecting a user one snaps the user back. Upstream accepts everything; the 2026-08 fork rejected
+hidden-ws focus only for apps in `focus-steal-guard-apps`, which is app special-casing and still
+accepted every unlisted app (regression cases below).
+
+**Model.** The decision is made by *event order*, never by elapsed time: no `Date`/clock comparison
+anywhere in it (the 2 s variants — the spawn guard expiry and the parked
+`focus-steal-guard-proposal.diff` — were the failed timing-based attempts; see History). Two facts:
+- `pendingOwnFocus` — the window AeroSpace last asked macOS to focus and has not yet seen reported
+  back. `MacWindow.nativeFocus()` is the single choke point (light sessions' `focusAfter`, FFM,
+  spawn-intent placement, the guard push-backs, `garbageCollect`'s dead-window focus). Cleared by
+  that confirmation (checked before the last-known comparison, since push-backs re-focus the
+  already-known window), by physical input or a hotkey (the user acted; what macOS reports next is
+  theirs), or after 3 re-asserts.
+- `userInputToken` — a physical input happened and no AeroSpace-observed effect has spent it.
+  Granted by any mouse button going down, anywhere, and by the *release* of an app-switching chord
+  (`focus-grant-chords`, default `['cmd-tab', 'cmd-shift-tab', 'cmd-backtick', 'cmd-space']`, hotkey
+  key notation parsed after `key-mapping`, ctrl variants allowed, at least one modifier; the
+  activation rides the modifier release, so the token is granted on `flagsChanged` after the chord
+  went down). Plain typing and cmd-c/v/s never grant one. A new input *replaces* the token; tokens
+  never accumulate. Spent by the first observed effect: a hotkey binding firing
+  (`HotkeyBinding.swift`), `updateFocusCache` accepting a native focus change, or the focused window
+  being closed — detected in `garbageCollect` and, because `updateFocusCache` runs before garbage
+  collection in every session, also by a synchronous `CGWindowList` liveness probe of the previously
+  focused window right before rule 5. Same `NSEvent` global monitors as FFM.
+
+**Rules** for a reported window Y that differs from the last known native focus (popups return early
+as before, so a launcher panel never spends the cmd-space token):
+1. `own-confirmed` — Y is what AeroSpace asked for → accept (also releases the spawn guard).
+2. `visible` — Y's workspace is visible (or Y has none) → accept; spend the token if any.
+3. `stale-own-pending` — hidden ws while our own request is unanswered → reject, re-assert the
+   pending window (≤ 3 per request, then give up and clear).
+4. `strict-app` — hidden ws, app in `focus-steal-guard-apps` → reject + push back (the list is now
+   the *strict* list; the 2026-09-05 fixes stay: record the stolen window as the app's
+   native-focused one before pushing back, accept when the focused workspace is empty).
+5. `user-input:<kind>` — hidden ws with an unspent token → accept, spend it.
+6. `no-input` — hidden ws, nothing to justify it → machine-caused → reject + push back like 4.
+
+Every hidden-ws decision writes one fork-debug-log line: `[<rule>; token=<kind>|none(spent-by:…)
+lastInput=<kind>]`. Rule 2 only logs when the workspace changed (the existing "pulls focus away"
+line, now with the token state). The spawn guard logs `spawnFocusGuard: REJECTED same-app steal`.
+
+**How the known cases play out.** Machine: (m1) stale own-activation report → rule 3 while pending,
+rule 6 once confirmed; (m2) WhatsApp background re-key → rule 6 (no token; a dangling one is the
+limitation below); (m3) WezTerm activating a hidden-ws window after alt-enter → the hotkey spent the
+token, the placement set `pendingOwnFocus` → spawn guard / rule 3 / rule 4 / rule 6, rejected on
+every path; (m4) Chrome/Claude re-key after a close → close by hotkey: token already spent; close by
+click: the liveness probe or `garbageCollect` spends it → rule 4/6. User: cmd-tab → chord release
+grants, the switcher's activation → rule 5; Dock click → mouse-down grants, the Dock is never
+managed → rule 5; cmd-space → Enter → app: chord release grants, the launcher panel is a popup (no
+spend), its destruction is not the focused window (no spend), the app's hidden window → rule 5 (a
+freshly launched app's new window lands on the focused ws → rule 2); link click in the already
+focused app → mouse-down grants, macOS still reports that window (no change, no spend), the target
+app's hidden window → rule 5; notification click → same as Dock.
+
+**Regression cases** (fork.9, `fork-debug.log`, 2026-09-12 — both unlisted-app accepts):
+- 09:16:35 hotkey `workspace 10` (setActiveWorkspace 9 -> 10) → AeroSpace `nativeFocus`es
+  Chrome@ws10 → 29 ms later an `ax(AXMoved)` session asks macOS for the focused window and still
+  gets WhatsApp@ws9 → accepted ("pulls focus away from ws 10", 10 -> 9) → then Chrome@ws10, the
+  window the user asked for, is REJECTED as a hidden-ws steal because ws10 is hidden now; the user
+  re-presses the hotkey 1.2 s later. Now: WhatsApp report → rule 3 (pending Chrome, re-assert) or
+  rule 6 (Chrome confirmed first, hotkey spent the token) → rejected; Chrome → rule 1.
+- 12:49:18 WhatsApp@ws9 re-keys while the user sits on ws10 with no input at all → accepted (10 ->
+  9), 22 ms later flipped back (9 -> 10). Now: rule 6, pushed back.
+
+**Known limitations** (deliberate; no timeout will be added — elapsed time is the heuristic this
+replaces): (1) dangling tokens: a click inside the already-focused window must grant one (a link
+click that activates another app 100 ms later is indistinguishable), so if no link was clicked the
+token lingers until the next input/hotkey/accept and one machine-caused hidden-ws activation can
+ride it; (2) one input, one effect: a click that both focuses a window and opens a link spends the
+token on the window (rule 2) and the link's app is rejected (rule 6) — click twice; (3) a
+cmd-modified AeroSpace hotkey may grant a token after the hotkey handler spent it (monitor vs Carbon
+handler order), harmless: the next hotkey/accept spends it; (4) strict-list apps still snap back on
+cmd-tab (rule 4 precedes 5) — the list is meant to shrink as the logs validate 5/6. Validation: a
+week of `grep 'hidden-ws' ~/.local/state/aerospace/fork-debug.log` — every `ACCEPTED … user-input`
+should match a real user action, every `REJECTED … no-input` a machine one.
+
+**History.** 2026-08: multi-instance apps (WezTerm runs one process per window) fire
+`AXFocusedWindowChanged` from background instances; upstream accepts every native focus event,
+silently flipping the active workspace (symptom: `focus right` across monitors lands on the wrong
+workspace, because it targets the monitor's *active* workspace). For listed apps, native focus
+pointing at a window on a non-visible workspace was rejected and macOS pushed back; Chrome + Claude
+were added 2026-08-02 for the re-key-after-close case. Known cost: cmd-tab to a hidden listed app
+snapped back. 2026-09-05 review fixes: (a) the push-back records the stolen window as the app's
+native-focused one first, so `MacApp.nativeFocus` takes the AX raise path — on one monitor the
+activate-only shortcut was a no-op for same-app steals (Chrome cmd-` onto a hidden window), macOS
+stayed on the hidden window and every refresh session re-rejected it (one Chrome window: 764
+REJECTED lines); (b) when the focused workspace is empty there is nothing to push back to, so the
+native focus is accepted instead of leaving the guarded app frontmost with its window parked
+off-screen. 2026-09-05 review data on session-event discrimination: WezTerm steals arrive as
+`didActivateApplication` too (26 of 361), ~1 ms before their `ax(AXFocusedWindowChanged)` twin, so
+"reject only .ax sessions" would accept the steal; Chrome rejections (955) were 80% one window
+re-rejected every session (fix (a)). The parked `focus-steal-guard-proposal.diff` (cross-app
+activation + no hotkey in the last 2 s) and the "user-intent clock" idea (accept within ~1 s of a
+deliberate action) were both clock-based and are superseded by this model; the diff is kept only as
+a record of what not to do.
 
 ### 7. fork-debug-log (config)
 `Sources/AppBundle/forkDebugLog.swift`. Opt-in tracing to
@@ -182,7 +276,8 @@ Gotchas (all learned in production):
   `<name>_help_generated` constant the parser references) + entries in `docs/commands.adoc`,
   `cmdArgsManifest.swift` (2 places), `cmdManifest.swift`.
 - `aerospace config --get` cannot address fork-added config keys (cosmetic; they parse and work).
-- Adding config keys: `Config.swift` field + `parseConfig.swift` table entry.
+- Adding config keys: `Config.swift` field + `parseConfig.swift` table entry (keys that use hotkey
+  notation, like `focus-grant-chords`, are parsed manually after `key-mapping`, like `mode`).
 
 ## Integration with ~/git/config
 
@@ -198,20 +293,10 @@ Gotchas (all learned in production):
 
 ## Open items
 
-- **Generalize the two app allowlists** (spawn-intent-apps, focus-steal-guard-apps) into a single
-  global "user-intent clock": track the last deliberate user action (hotkey binding, global
-  mouse-down, cmd-modified keystroke) in-process; spawn placement anchors to it, and native focus
-  changes onto hidden workspaces are accepted only within ~1s of one. Removes app special-casing;
-  costs global keyDown/mouseDown monitors and small coincidence windows. fork-debug-log data
-  (session tags on REJECTED lines) will show whether session-event discrimination
-  (didActivateApplication vs bare AXFocusedWindowChanged) is reliable enough to skip the input
-  monitors entirely.
-  **2026-09-05 review data says no:** WezTerm steals arrive as `didActivateApplication` too (26 of
-  361), ~1 ms *before* their `ax(AXFocusedWindowChanged)` twin, so "reject only .ax sessions" would
-  accept the steal. Chrome rejections (955) were 80% one window re-rejected every session — the
-  push-back no-op fixed in §6 — not independent steals. Cost of keeping Chrome in the list: link
-  clicks / cmd-tab into a Chrome window on a hidden ws snap back. Candidate patch (cross-app
-  activation + no hotkey in last 2 s), NOT applied: `focus-steal-guard-proposal.diff`.
+- **Shrink `focus-steal-guard-apps`** once a week of fork-debug-log lines shows rules 5/6 of the
+  event-order guard (§6) judging Chrome/Claude/WezTerm correctly; then drop the key. `spawn-intent-apps`
+  is the remaining app list: spawn-intent could anchor every new tiling window to the last hotkey's
+  focus context (typing and FFM hovers don't move the anchor) — separate change, not started.
 - Upstream PR for #1 (FFM re-raise guard), referencing discussion #2177.
 - Possibly upstream dump-tree/load-tree (#2173 and #57 are circling layout persistence).
 - Disable fork-debug-log once the alt-l/ws4 steal is confirmed dead in daily use.

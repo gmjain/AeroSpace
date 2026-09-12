@@ -29,25 +29,22 @@ keep history linear.
 
 ## Active tasks
 
-### 1. Replace app allowlists with a global "user-intent clock" (NEXT UP)
-`spawn-intent-apps` and `focus-steal-guard-apps` both special-case WezTerm; the user dislikes the
-special-casing. Both approximate one concept: *did the user deliberately act just now?*
-
-Design (agreed direction, not yet green-lit):
-- Track last deliberate user action in-process: any hotkey binding (already hooked in
-  `HotkeyBinding.swift`), global mouse-down, cmd-modified keystroke (covers cmd-tab; Dock is a
-  click). Same NSEvent global-monitor mechanism FFM already uses.
-- spawn-intent goes global (drop `spawn-intent-apps`): every new tiling window anchors to the
-  focus context of the last deliberate action. Typing and FFM hovers don't move the anchor.
-- steal-guard goes global (drop `focus-steal-guard-apps`): native focus onto a hidden-workspace
-  window is accepted only within ~1s of a deliberate action; otherwise rejected + pushed back.
-- **Decision gate first**: check `grep REJECTED ~/.local/state/aerospace/fork-debug.log` after a
-  week of use. If rejected steals are always `session: ax(AXFocusedWindowChanged)` and legit
-  activations arrive as didActivateApplication sessions, discriminate on session event alone —
-  no input monitors, no heuristics. Otherwise build the intent clock.
-- Acceptance: both allowlist keys deleted from config; cmd-tab/Dock-click to hidden-workspace
-  apps still switches workspaces; no wrong-workspace alt-l landings; no focus steals after
-  alt-enter.
+### 1. Stop special-casing apps for focus stealing (SUPERSEDED by the event-order model)
+Status: built 2026-09-12 on branch `event-order-guard`; deploy with the next release build, then
+awaiting a week of logs.
+`focus-steal-guard-apps` used to be the only defense; the "user-intent clock" (accept hidden-ws
+focus within ~1 s of a deliberate action) and the parked 2 s proposal diff were clock-based and are
+dropped. What landed instead (FORK.md §6): `pendingOwnFocus` (our own unanswered focus request) +
+`userInputToken` (mouse-down / release of a `focus-grant-chords` chord, spent by the first observed
+effect), six ordered rules in `updateFocusCache`, no clock anywhere; the app list is now the
+*strict* list. The decision gate from the old plan is answered (session events don't discriminate).
+- Validate: `grep 'hidden-ws' ~/.local/state/aerospace/fork-debug.log` after a week — every
+  `ACCEPTED … [user-input:…]` must be a real cmd-tab/click/launch, every `REJECTED … [no-input…]`
+  a machine one. Watch for `token=none(spent-by:accept:…)` on a rejected cmd-tab (limitation 2).
+- Then: remove Chrome/Claude/WezTerm from `focus-steal-guard-apps` one at a time; drop the key.
+- Not done here: making spawn-intent global (drop `spawn-intent-apps`) — separate change.
+- Acceptance unchanged: cmd-tab/Dock-click/Spotlight to hidden-workspace apps switch workspaces;
+  no wrong-workspace alt-l landings; no focus steals after alt-enter; no self-flips (WhatsApp).
 
 ### 2. Confirm the ws4 steal is dead, then disable fork-debug-log
 `fork-debug-log = true` is live to observe the steal guard. After a few clean days: flip to
