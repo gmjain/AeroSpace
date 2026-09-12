@@ -9,6 +9,10 @@ import Common
     lastKnownNativeFocusedWindowId == window.windowId
 }
 
+/// [FORK gmjain/AeroSpace] The window id macOS last reported as focused (nil = none / desktop). Lets
+/// focus-follows-mouse raise once per distinct observation instead of on every mouse move.
+@MainActor var nativeFocusObservation: UInt32? { lastKnownNativeFocusedWindowId }
+
 /// The data should flow (from nativeFocused to focused) and
 ///                      (from nativeFocused to lastKnownNativeFocusedWindowId)
 /// Alternative names: takeFocusFromMacOs, syncFocusFromMacOs

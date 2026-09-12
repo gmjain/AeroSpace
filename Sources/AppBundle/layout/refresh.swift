@@ -73,6 +73,7 @@ func runLightSession<T>(
         let workspaceNameBefore = focus.workspace.name // [FORK gmjain/AeroSpace]
 
         await refreshModel_nonCancellable()
+        let ownFocusSeqBefore = ownFocusRequestSeq // [FORK gmjain/AeroSpace]
         let result = try await body()
         await refreshModel_nonCancellable()
 
@@ -81,7 +82,11 @@ func runLightSession<T>(
         updateTrayText()
         SecureInputPanel.shared.refresh()
         if !event.isFocusFollowsMouse { try await layoutWorkspaces() }
-        if focusBefore != focusAfter {
+        // [FORK gmjain/AeroSpace] Skip the sync raise when the body itself already asked macOS for
+        // exactly this window (focus-follows-mouse does): the second make-main + raise landed on the
+        // app's UI thread for nothing, and on a slow Chrome it doubled the AX flood (2026-09-12).
+        let bodyAlreadyAsked = ownFocusRequestSeq != ownFocusSeqBefore && pendingOwnFocus?.windowId == focusAfter?.windowId
+        if focusBefore != focusAfter, !bodyAlreadyAsked {
             focusAfter?.nativeFocus() // syncFocusToMacOs
         }
         // [FORK gmjain/AeroSpace] spawn-intent: a CLI command that moved focus

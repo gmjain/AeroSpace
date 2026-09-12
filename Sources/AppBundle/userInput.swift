@@ -122,10 +122,15 @@ struct PendingOwnFocus: Equatable {
 let maxOwnFocusReasserts = 3
 
 @MainActor private(set) var pendingOwnFocus: PendingOwnFocus? = nil
+/// Incremented on every own focus request (even a re-request of the same window), so a caller can
+/// tell whether a request was issued between two points in time — e.g. runLightSession skips its
+/// sync raise when the session body already asked macOS for the very window it would raise.
+@MainActor private(set) var ownFocusRequestSeq: Int = 0
 
 /// Called from the single place where AeroSpace asks macOS to focus a window (MacWindow.nativeFocus).
 /// Re-asserting the same window keeps its re-assert counter; a different window starts a new request.
 @MainActor func noteOwnFocusRequest(_ windowId: UInt32) {
+    ownFocusRequestSeq += 1
     if pendingOwnFocus?.windowId == windowId { return }
     pendingOwnFocus = PendingOwnFocus(windowId: windowId, reasserts: 0)
 }

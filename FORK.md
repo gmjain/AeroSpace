@@ -30,6 +30,12 @@ own popup windows (Chrome extension dropdowns, menubar-app panels). Related: ups
 `updateFocusCache`'s last-seen native window). Before, a desktop/gap click (Finder) or a Dock click
 on an app with only minimized windows left AeroSpace's focus on X while macOS was elsewhere, and
 hovering X never restored it. Popups still survive: the popup early-return never updates the cache.
+2026-09-12 (fork.11): that skip re-raised on *every* mouse move until macOS confirmed the window;
+on a loaded machine Chrome→Chrome hovers (make-main + raise on Chrome's UI thread, not the cheap
+activate path) queued dozens of AX actions and made Chrome slower to confirm — a feedback loop felt
+as "FFM lag between two Chrome windows". Now: one raise per distinct native-focus observation
+(`ffmLastRaise`), runLightSession skips its sync raise when the body already asked for that window
+(`ownFocusRequestSeq`), and the AXFullScreen read is skipped for windows AeroSpace already manages.
 
 ### 2. dump-tree / load-tree commands
 `Sources/AppBundle/tree/treeDump.swift`, `DumpTreeCommand`, `LoadTreeCommand`.
