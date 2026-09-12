@@ -8,15 +8,6 @@ import AppKit
 /// every mouse move while a slow app (Chrome under load) was still processing the first make-main +
 /// raise queued dozens of AX actions on its UI thread and made it slower still (2026-09-12).
 @MainActor private var ffmLastRaise: (windowId: UInt32, observation: UInt32?)? = nil
-/// [FORK gmjain/AeroSpace] At most one AX hit-test probe in flight. AXUIElementCopyElementAtPosition
-/// into Chrome web content took 100-350 ms each on 2026-09-12 and every mouse move spawned another
-/// (a cancelled Task cannot cancel the IPC already sent), so ~40 piled up and Chrome answered them
-/// as a burst: focus arrived seconds late. The window-server hit test below makes the AX probe rare;
-/// this flag keeps it from stacking when it does run.
-@MainActor private var axProbeInFlight = false
-/// Overlay processes whose windows sit over the real ones and must not count as "the window under the
-/// cursor": JankyBorders draws a border window per app window, Hammerspoon draws indicators.
-private let ffmIgnoredWindowOwners: Set<String> = ["borders", "Hammerspoon"]
 
 @MainActor func syncFocusFollowsMouse(_ config: Config) {
     if config.focusFollowsMouse.enabled == (focusFollowsMouseMonitor != nil) {
@@ -41,47 +32,16 @@ private let ffmIgnoredWindowOwners: Set<String> = ["borders", "Hammerspoon"]
             try checkCancellation()
             // [FORK gmjain/AeroSpace] phase timing for fork-debug-log (only hovers slower than 25 ms).
             let t0 = ContinuousClock.now
-            var tCg: Duration = .zero, tAx: Duration = .zero, tRects: Duration = .zero, tSession: Duration = .zero
+            var tAx: Duration = .zero, tRects: Duration = .zero, tSession: Duration = .zero
             var outcome = "skip"
             defer {
                 let total = ContinuousClock.now - t0
                 if config.forkDebugLog, total > .milliseconds(25) {
-                    forkDebugLog("ffm: \(outcome) total=\(total.ms)ms cg=\(tCg.ms)ms ax=\(tAx.ms)ms rects=\(tRects.ms)ms session=\(tSession.ms)ms")
+                    forkDebugLog("ffm: \(outcome) total=\(total.ms)ms ax=\(tAx.ms)ms rects=\(tRects.ms)ms session=\(tSession.ms)ms")
                 }
             }
             // Ignores macOS menubar dropdown, but, unfortunately, it doesn't ignore non-native menu-like fake windows.
             // todo: It would be cool to somehow reuse isWindowHeuristic logic here
-            // [FORK gmjain/AeroSpace] Ask the window server first: which on-screen window is topmost
-            // at the cursor (CGWindowList, no app IPC). A window AeroSpace already manages is handled
-            // right here; a native menu / Dock / notification (non-zero layer) means "don't refocus";
-            // only a window AeroSpace does not know needs the AX probe below.
-            let cgStart = ContinuousClock.now
-            let cgHit = await cgWindowUnderMouse(location)
-            tCg = ContinuousClock.now - cgStart
-            try checkCancellation()
-            var window: Window? = nil
-            var needsAxProbe = false
-            switch cgHit {
-                case nil: outcome = "skip-nothing"; return
-                case .overlay: outcome = "skip-overlay"; return
-                case .window(let id, let pid):
-                    if let known = Window.get(byId: id) {
-                        switch known.windowParentCases {
-                            case .tilingContainer, .floatingWindowsContainer: window = known
-                            case .macosFullscreenWindowsContainer: outcome = "skip-fullscreen"; return
-                            case .macosPopupWindowsContainer: outcome = "skip-popup"; return
-                            case .macosMinimizedWindowsContainer, .macosHiddenAppsWindowsContainer, .unbound: needsAxProbe = true
-                        }
-                    } else if ownsNativeFullscreenWindow(pid: pid) {
-                        outcome = "skip-fullscreen-child"; return // child window of a native-fullscreen app
-                    } else {
-                        needsAxProbe = true
-                    }
-            }
-            if needsAxProbe {
-            guard !axProbeInFlight else { outcome = "skip-probe-busy"; return }
-            axProbeInFlight = true
-            defer { axProbeInFlight = false }
             // Windows AeroSpace already tiles/floats cannot be native fullscreen (those live in the
             // fullscreen container), so the AXFullScreen round trip is skipped for them.
             let ordinaryManaged = ordinaryManagedWindowIds()
@@ -109,11 +69,11 @@ private let ffmIgnoredWindowOwners: Set<String> = ["borders", "Hammerspoon"]
                     // apps drawn over the fullscreen Space (Notification Center banners) still fall through.
                     if let pid, ownsNativeFullscreenWindow(pid: pid), !isOrdinaryManagedWindow(windowId) { return }
             }
-            }
             try checkCancellation()
             let workspace = location.monitorApproximation.activeWorkspace
+            var window: Window? = nil
             let rectsStart = ContinuousClock.now
-            for child in workspace.floatingWindowsContainer.mruChildren where window == nil {
+            for child in workspace.floatingWindowsContainer.mruChildren {
                 try checkCancellation()
                 guard let child = child as? Window else { continue }
                 guard let rect = try await child.getAxRect(.cancellable) else { continue }
@@ -169,37 +129,6 @@ private let ffmIgnoredWindowOwners: Set<String> = ["borders", "Hammerspoon"]
 /// [FORK gmjain/AeroSpace] Ids of every window AeroSpace currently tiles or floats (any workspace).
 @MainActor private func ordinaryManagedWindowIds() -> Set<CGWindowID> {
     Set(MacWindow.allWindows.lazy.filter { $0.parent is TilingContainer || $0.parent is FloatingWindowsContainer }.map(\.windowId))
-}
-
-/// [FORK gmjain/AeroSpace] Result of the window-server hit test.
-private enum CgUnderMouse: Equatable, Sendable {
-    /// A non-zero-layer window (menu, Dock, menu bar, Notification Center, Spotlight) is in front.
-    case overlay
-    case window(id: CGWindowID, pid: pid_t)
-}
-
-/// Topmost on-screen window at `location` per the window server. nil = nothing there (desktop).
-/// Pure CoreGraphics, ~1 ms, no round trip into any app. Overlay owners (see ffmIgnoredWindowOwners)
-/// and fully transparent windows are skipped.
-@concurrent
-private nonisolated func cgWindowUnderMouse(_ location: CGPoint) async -> CgUnderMouse? {
-    guard let infos = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-        return nil
-    }
-    for info in infos { // front to back
-        guard let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
-              let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary),
-              bounds.contains(location)
-        else { continue }
-        if let alpha = info[kCGWindowAlpha as String] as? Double, alpha == 0 { continue }
-        if let owner = info[kCGWindowOwnerName as String] as? String, ffmIgnoredWindowOwners.contains(owner) { continue }
-        if let layer = info[kCGWindowLayer as String] as? Int, layer != 0 { return .overlay }
-        guard let id = info[kCGWindowNumber as String] as? CGWindowID,
-              let pid = info[kCGWindowOwnerPID as String] as? pid_t
-        else { return nil }
-        return .window(id: id, pid: pid)
-    }
-    return nil
 }
 
 private enum AxUnderMouse: Equatable {
