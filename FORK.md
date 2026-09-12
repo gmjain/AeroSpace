@@ -36,13 +36,6 @@ activate path) queued dozens of AX actions and made Chrome slower to confirm —
 as "FFM lag between two Chrome windows". Now: one raise per distinct native-focus observation
 (`ffmLastRaise`), runLightSession skips its sync raise when the body already asked for that window
 (`ownFocusRequestSeq`), and the AXFullScreen read is skipped for windows AeroSpace already manages.
-2026-09-12 (fork.13): the real cost was upstream's own per-move `AXUIElementCopyElementAtPosition`
-hit test — into Chrome web content it took 100-350 ms and, since a cancelled Task cannot recall an
-IPC already sent, ~40 piled up per hover and Chrome answered them as one burst (fork.12 timing
-trace). FFM now asks the window server (`CGWindowListCopyWindowInfo`, ~1 ms, no app IPC) which
-window is topmost under the cursor: a managed window is used directly, a non-zero-layer window
-(menu, Dock, notification) means "don't refocus", JankyBorders/Hammerspoon overlay windows are
-skipped by owner, and only an unknown window falls back to the AX probe, one in flight at a time.
 
 ### 2. dump-tree / load-tree commands
 `Sources/AppBundle/tree/treeDump.swift`, `DumpTreeCommand`, `LoadTreeCommand`.
