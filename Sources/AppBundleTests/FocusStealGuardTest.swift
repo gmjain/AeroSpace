@@ -1,0 +1,213 @@
+@testable import AppBundle
+import Common
+import XCTest
+
+// [FORK gmjain/AeroSpace] event-order focus guard (updateFocusCache rules 1-6, userInput.swift)
+@MainActor
+final class FocusStealGuardTest: XCTestCase {
+    override func setUp() async throws {
+        setUpWorkspacesForTests()
+        resetUserInputState()
+    }
+
+    override func tearDown() async throws {
+        resetUserInputState()
+        appForTests = nil
+    }
+
+    /// Focused visible workspace with `visible` focused (and last known as macOS's focus too),
+    /// `hidden` on a non-visible workspace.
+    private func arrange() -> (visible: TestWindow, hidden: TestWindow) {
+        let visible = TestWindow.new(id: 1, parent: focus.workspace.rootTilingContainer)
+        let hidden = TestWindow.new(id: 2, parent: Workspace.get(byName: "hidden").rootTilingContainer)
+        _ = visible.focusWindow()
+        updateFocusCache(visible) // rule 2: lastKnown = visible
+        assertEquals(focus.windowOrNil, visible)
+        assertTrue(Workspace.get(byName: "hidden").isVisible == false)
+        return (visible, hidden)
+    }
+
+    func testNoInputHiddenWsRejectedAndPushedBack() {
+        let (visible, hidden) = arrange()
+        TestApp.shared.focusedWindow = nil
+        updateFocusCache(hidden) // rule 6
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(TestApp.shared.focusedWindow, visible) // pushed back
+        assertTrue(Workspace.get(byName: "hidden").isVisible == false)
+    }
+
+    func testUserInputTokenAcceptsHiddenWsAndIsSpent() {
+        let (_, hidden) = arrange()
+        grantUserInputToken(.mouseDown(.leftMouseDown))
+        updateFocusCache(hidden) // rule 5
+        assertEquals(focus.windowOrNil, hidden)
+        assertTrue(Workspace.get(byName: "hidden").isVisible)
+        assertEquals(userInputToken, false)
+        assertEquals(lastUserInputKind, .mouseDown(.leftMouseDown))
+        // The token was spent: the next hidden-workspace change is machine-caused again.
+        let other = TestWindow.new(id: 3, parent: Workspace.get(byName: "other").rootTilingContainer)
+        updateFocusCache(other) // rule 6
+        assertEquals(focus.windowOrNil, hidden)
+        assertEquals(TestApp.shared.focusedWindow, hidden)
+    }
+
+    func testTokensNeverAccumulateAndReplaceKind() {
+        grantUserInputToken(.mouseDown(.leftMouseDown))
+        grantUserInputToken(.chord("cmd-tab"))
+        assertEquals(lastUserInputKind, .chord("cmd-tab"))
+        assertTrue(consumeUserInputToken(by: "test"))
+        assertEquals(consumeUserInputToken(by: "test"), false)
+        assertEquals(lastUserInputSpentBy, "test")
+    }
+
+    func testVisibleAcceptSpendsToken() {
+        let (_, hidden) = arrange()
+        let visible2 = TestWindow.new(id: 4, parent: focus.workspace.rootTilingContainer)
+        grantUserInputToken(.chord("cmd-tab"))
+        updateFocusCache(visible2) // rule 2 spends the token
+        assertEquals(focus.windowOrNil, visible2)
+        assertEquals(userInputToken, false)
+        updateFocusCache(hidden) // rule 6
+        assertEquals(focus.windowOrNil, visible2)
+    }
+
+    func testStrictAppRejectedDespiteToken() {
+        let (visible, hidden) = arrange()
+        config.focusStealGuardApps = [TestApp.shared.rawAppBundleId!]
+        grantUserInputToken(.mouseDown(.leftMouseDown))
+        updateFocusCache(hidden) // rule 4 comes before rule 5
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(TestApp.shared.focusedWindow, visible)
+        assertEquals(userInputToken, true) // not spent by a rejection
+    }
+
+    func testStaleReportWhileOwnRequestPendingIsRejectedAndReasserted() {
+        let (visible, hidden) = arrange()
+        noteOwnFocusRequest(visible.windowId) // AeroSpace asked macOS for `visible`
+        TestApp.shared.focusedWindow = nil
+        updateFocusCache(hidden) // rule 3
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(TestApp.shared.focusedWindow, visible) // re-asserted
+        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: 1))
+        // macOS answers with the window we asked for, even though it already was the last known
+        // native focus: the request is confirmed and nothing is pending anymore.
+        updateFocusCache(visible)
+        assertEquals(pendingOwnFocus, nil)
+        assertEquals(focus.windowOrNil, visible)
+    }
+
+    func testReassertBudgetThenNoInputRule() {
+        let (visible, hidden) = arrange()
+        noteOwnFocusRequest(visible.windowId)
+        for i in 1 ... maxOwnFocusReasserts {
+            updateFocusCache(hidden) // rule 3
+            assertEquals(pendingOwnFocus?.reasserts, i)
+        }
+        updateFocusCache(hidden) // budget spent -> rule 6
+        assertEquals(pendingOwnFocus, nil)
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(TestApp.shared.focusedWindow, visible)
+    }
+
+    func testOwnConfirmedAcceptsHiddenWs() {
+        let (_, hidden) = arrange()
+        noteOwnFocusRequest(hidden.windowId) // asked for it before its workspace got hidden
+        updateFocusCache(hidden) // rule 1
+        assertEquals(focus.windowOrNil, hidden)
+        assertEquals(pendingOwnFocus, nil)
+    }
+
+    func testUserInputAndHotkeyClearPendingOwnRequest() {
+        noteOwnFocusRequest(42)
+        grantUserInputToken(.mouseDown(.rightMouseDown))
+        assertEquals(pendingOwnFocus, nil)
+        noteOwnFocusRequest(42)
+        clearPendingOwnFocus() // what the hotkey handler does
+        assertEquals(pendingOwnFocus, nil)
+    }
+
+    func testEmptyFocusedWorkspaceAcceptsHiddenWs() {
+        let hidden = TestWindow.new(id: 2, parent: Workspace.get(byName: "hidden").rootTilingContainer)
+        assertEquals(focus.windowOrNil, nil)
+        updateFocusCache(hidden) // rule 6 with nothing to push back to
+        assertEquals(focus.windowOrNil, hidden)
+    }
+
+    func testCloseOfFocusedWindowSpendsTokenBeforeGarbageCollect() {
+        let (visible, hidden) = arrange()
+        grantUserInputToken(.mouseDown(.leftMouseDown)) // the click that closed `visible`
+        windowLivenessForTests = { $0 != visible.windowId } // window server already dropped it, GC not yet run
+        updateFocusCache(hidden) // the app re-keys a hidden window: rule 6, the close spent the token
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(userInputToken, false)
+        assertTrue(lastUserInputSpentBy?.hasPrefix("close:") == true)
+    }
+
+    func testPopupNeverJudged() {
+        let (visible, _) = arrange()
+        let popup = TestWindow.new(id: 5, parent: macosPopupWindowsContainer)
+        grantUserInputToken(.mouseDown(.leftMouseDown))
+        updateFocusCache(popup)
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(userInputToken, true) // a launcher panel must not spend the cmd-space token
+    }
+
+    func testSpawnFocusGuardRejectsSameAppUntilConfirmedOrCapped() {
+        let (visible, _) = arrange()
+        let placed = TestWindow.new(id: 6, parent: focus.workspace.rootTilingContainer)
+        _ = placed.focusWindow()
+        updateFocusCache(placed) // macOS took the placement: lastKnown = placed
+        armSpawnFocusGuard(placed.windowId)
+        for _ in 1 ... maxSpawnFocusGuardRefires {
+            TestApp.shared.focusedWindow = nil
+            updateFocusCache(visible) // same app, visible: the guard still rejects it
+            assertEquals(focus.windowOrNil, placed)
+            assertEquals(TestApp.shared.focusedWindow, placed)
+        }
+        updateFocusCache(visible) // refire cap hit: released, the general rules accept a visible window
+        assertEquals(focus.windowOrNil, visible)
+    }
+
+    func testSpawnFocusGuardReleasedByConfirmationAndByUserInput() {
+        let (visible, _) = arrange()
+        let placed = TestWindow.new(id: 6, parent: focus.workspace.rootTilingContainer)
+        _ = placed.focusWindow()
+        armSpawnFocusGuard(placed.windowId)
+        updateFocusCache(placed) // macOS confirmed the placed window
+        updateFocusCache(visible) // no guard anymore
+        assertEquals(focus.windowOrNil, visible)
+
+        _ = placed.focusWindow()
+        updateFocusCache(placed)
+        armSpawnFocusGuard(placed.windowId)
+        grantUserInputToken(.mouseDown(.leftMouseDown)) // user intent releases the guard
+        updateFocusCache(visible)
+        assertEquals(focus.windowOrNil, visible)
+    }
+
+    func testParseFocusGrantChords() {
+        let result = parseConfig(
+            """
+            focus-grant-chords = ['cmd-tab', 'ctrl-space', 'cmd-shift-backtick']
+            """,
+        )
+        assertEquals(result.errors, [])
+        assertEquals(result.config.focusGrantChords.map(\.notation), ["cmd-tab", "ctrl-space", "cmd-shift-backtick"])
+        assertEquals(result.config.focusGrantChords[1].modifiers, .control)
+        assertEquals(result.config.focusGrantChords[1].key, .space)
+        assertEquals(result.config.focusGrantChords[2].modifiers, [.command, .shift])
+        assertEquals(result.config.focusGrantChords[2].key, .grave)
+        assertEquals(defaultConfig.focusGrantChords.map(\.notation), ["cmd-tab", "cmd-shift-tab", "cmd-backtick", "cmd-space"])
+    }
+
+    func testParseFocusGrantChordsErrors() {
+        assertEquals(
+            parseConfig("focus-grant-chords = ['tab']").strErrors,
+            ["[ERROR] focus-grant-chords[0]: 'tab': a focus-grant chord needs at least one modifier"],
+        )
+        assertEquals(
+            parseConfig("focus-grant-chords = ['cmd-nope']").strErrors,
+            ["[ERROR] focus-grant-chords[0]: Can't parse the key in 'cmd-nope' binding"],
+        )
+    }
+}
