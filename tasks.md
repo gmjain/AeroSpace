@@ -69,7 +69,8 @@ fork-flavored and probably stays ours.
   Spaces" (user wants menu bar/tray on every display).
 
 ### 6. Upstream rebase hygiene
-On next upstream release: fetch into `upstream` branch, rebase `main`, re-check each fork commit
+Last done 2026-10-04 (upstream `main` 74a1bf17; one conflict + one compile fix, both from the
+`MonitorInfo` rename). On next upstream release: fetch into `upstream` branch, rebase `main`, re-check each fork commit
 (FFM guard may conflict with upstream FFM evolution — it's a fast-moving beta feature), bump
 `--build-version`, redeploy. FORK.md has the recipe.
 

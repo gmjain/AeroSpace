@@ -7,10 +7,12 @@ Owner: Gaurav Jain. This file is the canonical record of what diverges and why.
 
 - `upstream` — tracks `upstream/main` (nikitabobko). `git fetch upstream` lands here.
   **Never push there.** Remote `upstream` has push URL `DISABLED` (`git remote set-url --push`)
-  so an accidental `git push upstream` fails. Checked 2026-09-05: upstream idle since 2026-07-03
-  (one cosmetic rename `Monitor`→`MonitorInfo`, c548c7f8) — no rebase needed yet.
-- `main` — **the deployable patch queue**. Linear history: upstream tag + fork commits, rebase
-  mechanics (no merge commits). Currently based on `v0.21.3-Beta`.
+  so an accidental `git push upstream` fails. Last rebase 2026-10-04 onto `upstream/main` 74a1bf17
+  (v0.21.3-Beta + 21: `Monitor`→`MonitorInfo` rename, `layout --for-next-detected-window`, Swift
+  6.4 with swiftly required). Fork fallout: `mainMonitor`/`sortedMonitors` → `…Info` in
+  spawn-intent and treeDump. Pre-rebase queue kept as tag `backup/main-pre-rebase-2026-10-04`.
+- `main` — **the deployable patch queue**. Linear history: upstream base + fork commits, rebase
+  mechanics (no merge commits). Currently based on upstream `main` @ 74a1bf17 (untagged).
 - Features are developed on branches (`tree-dump-load`, `auto-split`, `spawn-intent`, ...),
   verified, then ff-merged into `main`. **Always deploy `main`.**
 - Upstream update procedure: fetch into `upstream`, rebase `main`'s fork commits onto the new
@@ -250,16 +252,22 @@ drawn over the fullscreen Space (Notification Center banners) still fall through
 ## Build & deploy recipe
 
 ```sh
+# one-time: upstream requires swiftly (ea71acc2); toolchain version comes from .swift-version
+brew install swiftly && swiftly init --no-modify-profile --skip-install --assume-yes
+swiftly install "$(cat .swift-version)"
+
 # from repo root, on main
 bash generate.sh --build-version "0.21.3-Beta-fork.N" \
     --codesign-identity "VoiceInk Local Self-Signed" --generate-git-hash
-swift build -c release --arch arm64 --product aerospace          # CLI
+cli=(build -c release --arch arm64 --product aerospace)
+swiftly run swift "${cli[@]}"                                     # CLI
+cli_bin="$(swiftly run swift "${cli[@]}" --show-bin-path)"
 cd xcode && xcodebuild clean build -scheme AeroSpace \
     -destination "generic/platform=macOS" -configuration Release \
     -derivedDataPath .xcode-build; cd ..
 rm -rf .release && mkdir .release
 cp -r xcode/.xcode-build/Build/Products/Release/AeroSpace.app .release/
-cp .build/arm64-apple-macosx/release/aerospace .release/
+cp "$cli_bin/aerospace" .release/
 codesign -s "VoiceInk Local Self-Signed" .release/aerospace
 git checkout .   # generate.sh dirties generated files
 
@@ -270,6 +278,13 @@ aerospace restart   # fork command: layouts survive
 ```
 
 Gotchas (all learned in production):
+- **CLI path moved with Swift 6.4 (2026-10-04)**: the binary now lands in
+  `.build/out/Products/Release/`, not `.build/arm64-apple-macosx/release/`. The old hard-coded
+  path still holds a stale pre-rebase binary, so `cp` from it would succeed silently. Always copy
+  from `--show-bin-path`.
+- **swiftly is a hard build dependency (2026-10-04)**: `script/setup.sh` exits without it, and
+  `generate.sh` writes swiftly's toolchain into the xcodeproj (`TOOLCHAINS`), so `xcodebuild` and
+  the CLI use the same compiler. `--no-modify-profile` leaves the shell's `swift` as Xcode's.
 - **`git branch --show-current` must print `main` before building.** 2026-09-05: a session
   inherited a checkout parked on `user-intent-clock`, committed there, and deployed fork.8 with the
   rolled-back intent clock inside for ~10 min. Fix was: feature branch off main, cherry-pick,
