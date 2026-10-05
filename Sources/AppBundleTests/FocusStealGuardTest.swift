@@ -208,20 +208,59 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(focus.windowOrNil, visible)
     }
 
-    func testSpawnFocusGuardReleasedByConfirmationAndByUserInput() {
+    /// The placement and macOS's confirmation of the placed window can happen in the same session
+    /// (macOS keyed the new window before AeroSpace registered it). The confirmation must not release
+    /// the guard: the late same-app re-key of the anchor window it exists for comes after it.
+    func testSpawnFocusGuardSurvivesConfirmationReleasedByUserInput() {
         let (visible, _) = arrange()
         let placed = TestWindow.new(id: 6, parent: focus.workspace.rootTilingContainer)
         _ = placed.focusWindow()
+        placed.nativeFocus() // what the placement does
         armSpawnFocusGuard(placed.windowId)
-        updateFocusCache(placed) // macOS confirmed the placed window
-        updateFocusCache(visible) // no guard anymore
-        assertEquals(focus.windowOrNil, visible)
+        updateFocusCache(placed) // macOS confirms the placed window
+        assertEquals(pendingOwnFocus, nil)
+        assertEquals(spawnFocusGuardWindowId, placed.windowId)
+        TestApp.shared.focusedWindow = visible
+        updateFocusCache(visible) // late same-app re-key of the anchor window: still rejected
+        assertEquals(focus.windowOrNil, placed)
+        assertEquals(TestApp.shared.focusedWindow, placed)
 
+        grantUserInputToken(.mouseDown(.leftMouseDown)) // user intent releases the guard
+        assertEquals(spawnFocusGuardWindowId, nil)
+        updateFocusCache(visible)
+        assertEquals(focus.windowOrNil, visible)
+    }
+
+    /// Another app's focus change releases the guard only if the general rules accept it.
+    func testSpawnFocusGuardReleasedOnlyByAcceptedOtherAppChange() {
+        let (visible, _) = arrange()
+        let placed = TestWindow.new(id: 6, parent: focus.workspace.rootTilingContainer)
         _ = placed.focusWindow()
         updateFocusCache(placed)
         armSpawnFocusGuard(placed.windowId)
-        grantUserInputToken(.mouseDown(.leftMouseDown)) // user intent releases the guard
-        updateFocusCache(visible)
+        // Another app re-keys a hidden-workspace window with nobody at the keyboard: rule 6 rejects it.
+        let otherHidden = TestWindow.new(id: 7, parent: Workspace.get(byName: "hidden").rootTilingContainer, app: .other)
+        updateFocusCache(otherHidden)
+        assertEquals(focus.windowOrNil, placed)
+        assertEquals(spawnFocusGuardWindowId, placed.windowId) // a rejected change is no reason to release
+        updateFocusCache(visible) // so the same-app steal is still caught
+        assertEquals(focus.windowOrNil, placed)
+        // Another app on the visible workspace: rule 2 accepts it, which ends the guard.
+        let otherVisible = TestWindow.new(id: 8, parent: focus.workspace.rootTilingContainer, app: .other)
+        updateFocusCache(otherVisible)
+        assertEquals(focus.windowOrNil, otherVisible)
+        assertEquals(spawnFocusGuardWindowId, nil)
+    }
+
+    func testSpawnFocusGuardReleasedWhenPlacedWindowIsGone() {
+        let (visible, _) = arrange()
+        let placed = TestWindow.new(id: 6, parent: focus.workspace.rootTilingContainer)
+        _ = placed.focusWindow()
+        updateFocusCache(placed)
+        armSpawnFocusGuard(placed.windowId)
+        windowLivenessForTests = { $0 != placed.windowId } // closed, not garbage-collected yet
+        updateFocusCache(visible) // the app re-keys its other window: never pushed back to a dead window
+        assertEquals(spawnFocusGuardWindowId, nil)
         assertEquals(focus.windowOrNil, visible)
     }
 

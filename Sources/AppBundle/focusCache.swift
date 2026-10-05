@@ -29,12 +29,12 @@ import Common
     // lastKnown comparison: the requested window may already have been the last known native
     // focus (push-backs re-focus it), and the request must still be marked answered.
     let ownConfirmed = nativeFocused.map { confirmOwnFocus($0.windowId) } ?? false
-    if ownConfirmed, let nativeFocused { releaseSpawnFocusGuard(confirmed: nativeFocused.windowId) }
     if nativeFocused?.windowId != lastKnownNativeFocusedWindowId {
         // [FORK gmjain/AeroSpace] event-order focus guard (see userInput.swift for the model).
         if let nativeFocused, !acceptNativeFocusChange(nativeFocused, ownConfirmed: ownConfirmed) {
             return
         }
+        if let nativeFocused { releaseSpawnFocusGuard(acceptedFocusChangeTo: nativeFocused) } // [FORK gmjain/AeroSpace]
         // [FORK gmjain/AeroSpace] the moment macOS-side focus changes get
         // accepted — the usual culprit when workspaces flip "by themselves".
         if let nativeFocused, nativeFocused.nodeWorkspace != focus.workspace {

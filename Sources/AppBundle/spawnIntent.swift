@@ -57,11 +57,14 @@ struct SpawnIntent: Sendable, Equatable {
 // activate an OLDER instance of the same app, stealing focus from the window
 // we just placed. Guard the placed window: same-app native focus changes are
 // rejected and pushed back. The guard's lifetime is event-ordered, never timed
-// (2026-09-12; the 2 s ContinuousClock expiry is gone): it lives until macOS
-// confirms the guarded window (updateFocusCache rule 1 / this function seeing
-// it reported), a hotkey or physical input arrives (user intent), any other
-// app takes focus, AeroSpace itself picked the reported window, or the refire
-// cap is hit.
+// (2026-09-12; the 2 s ContinuousClock expiry is gone): it lives until a hotkey
+// or physical input arrives (user intent), AeroSpace itself picked the reported
+// window, the placed window is gone, the refire cap is hit, or updateFocusCache
+// ACCEPTS a focus change to another app's window. macOS confirming the placed
+// window does not end it (2026-10-04): when macOS keyed the new window before
+// AeroSpace saw it, placement and confirmation happen in the same refresh
+// session, and the late same-app re-key of the anchor window the guard exists
+// for came after it.
 
 private struct FocusGuard {
     let windowId: UInt32
@@ -72,6 +75,9 @@ let maxSpawnFocusGuardRefires = 3
 
 @MainActor private var _focusGuard: FocusGuard? = nil
 
+/// The guarded window, if a guard is armed (tests, debug).
+@MainActor var spawnFocusGuardWindowId: UInt32? { _focusGuard?.windowId }
+
 @MainActor func armSpawnFocusGuard(_ windowId: UInt32) {
     _focusGuard = FocusGuard(windowId: windowId, refires: 0)
 }
@@ -80,9 +86,11 @@ let maxSpawnFocusGuardRefires = 3
     _focusGuard = nil
 }
 
-/// macOS reported `windowId` as focused (updateFocusCache rule 1): a guard on it has done its job.
-@MainActor func releaseSpawnFocusGuard(confirmed windowId: UInt32) {
-    if _focusGuard?.windowId == windowId { _focusGuard = nil }
+/// updateFocusCache accepted a native focus change onto `window`. If that is not the guarded window,
+/// focus left it with the general rules' blessing (another app: same-app changes never get past
+/// rejectStolenNativeFocus while the guard holds): the guard is done.
+@MainActor func releaseSpawnFocusGuard(acceptedFocusChangeTo window: Window) {
+    if let guard_ = _focusGuard, guard_.windowId != window.windowId { _focusGuard = nil }
 }
 
 /// Returns true if this native focus change is an activation steal that was
@@ -90,12 +98,12 @@ let maxSpawnFocusGuardRefires = 3
 @MainActor func rejectStolenNativeFocus(_ nativeFocused: Window?) -> Bool {
     guard var guard_ = _focusGuard else { return false }
     guard let nativeFocused else { return false } // no focused window yet: nothing to judge
-    if nativeFocused.windowId == guard_.windowId {
-        _focusGuard = nil // macOS confirmed the placed window
-        return false
-    }
-    guard let guarded = Window.get(byId: guard_.windowId) else {
-        _focusGuard = nil // the placed window is gone
+    // macOS reports the guarded window: nothing to reject, and NOT a release (see above).
+    if nativeFocused.windowId == guard_.windowId { return false }
+    // The placed window is gone. The window-server probe catches a close before garbageCollect has
+    // run (updateFocusCache comes first in a session): never push back to a dead window.
+    guard let guarded = Window.get(byId: guard_.windowId), isWindowAliveInWindowServer(guard_.windowId) else {
+        _focusGuard = nil
         return false
     }
     // AeroSpace itself already chose this window (focus-follows-mouse, a CLI
@@ -106,19 +114,18 @@ let maxSpawnFocusGuardRefires = 3
         _focusGuard = nil
         return false
     }
-    if nativeFocused.app.rawAppBundleId == guarded.app.rawAppBundleId {
-        if guard_.refires >= maxSpawnFocusGuardRefires {
-            _focusGuard = nil // give up: the app keeps winning, let the general rules judge it
-            return false
-        }
-        guard_.refires += 1
-        _focusGuard = guard_
-        forkDebugLog("spawnFocusGuard: REJECTED same-app steal by \(forkDebugDescribe(nativeFocused)) "
-            + "[refire \(guard_.refires)/\(maxSpawnFocusGuardRefires) of \(forkDebugDescribe(guarded))] "
-            + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
-        guarded.nativeFocus()
-        return true
+    // Another app: not this guard's call. The general rules judge it, and the guard is released only
+    // if they accept it (releaseSpawnFocusGuard(acceptedFocusChangeTo:)), not when rule 6 rejects it.
+    guard nativeFocused.app.rawAppBundleId == guarded.app.rawAppBundleId else { return false }
+    if guard_.refires >= maxSpawnFocusGuardRefires {
+        _focusGuard = nil // give up: the app keeps winning, let the general rules judge it
+        return false
     }
-    _focusGuard = nil // focus went to a different app: user intent
-    return false
+    guard_.refires += 1
+    _focusGuard = guard_
+    forkDebugLog("spawnFocusGuard: REJECTED same-app steal by \(forkDebugDescribe(nativeFocused)) "
+        + "[refire \(guard_.refires)/\(maxSpawnFocusGuardRefires) of \(forkDebugDescribe(guarded))] "
+        + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
+    guarded.nativeFocus()
+    return true
 }
