@@ -1,6 +1,9 @@
 # Fork adversarial review
 
-## Status 2026-10-04 (after waves 1–2)
+Commit hashes cited in these docs predate the 2026-10-04 squash; they resolve via tag
+`backup/main-pre-squash-2026-10-04` (pushed to origin).
+
+## Status 2026-10-04 (after waves 1–3)
 
 - **Wave 1** (on `main` up to `272eefa5`): K-01..K-22 fixed, commits in the section 2 table.
   Through them the baseline regressions D9 (K-08) and F3 (K-16) and the open D4 (K-09) are
@@ -16,6 +19,12 @@
 - **Integration review fix**: `090c7b2e` keeps the R-03 collapse layout-neutral with
   opposite-orientation normalization on (it lifted a container into a same-orientation parent,
   which that normalization then flipped).
+- **Wave 3**: `4d9b2edb` (branch `fix/focus-guard-w3`) — input after an own focus request's
+  cause wins over rule 3. Before it, cmd-tab released while the alt-1 session still awaited AX
+  was rejected by rule 3 and, since R-06, its token was burnt. Integration fix-forward
+  `56148f88`: the hotkey spends only tokens with `userInputSeq <= ownFocusCauseInputSeq` (its
+  own cause); before, alt-1 spent that cmd-tab's token after its first AX await, so the
+  supersede check never fired.
 - **Documented gaps** (FORK.md §5/§6):
   - R-02: only windows already in a `MacosFullscreenWindowsContainer` count; a window that
     just went fullscreen is caught at the next layout pass.
@@ -28,7 +37,7 @@
   - Section 4 perf notes and the open section 5 gaps are unchanged.
 - **Pre-merge hashes** in sections 1-2 (`67e78520`, `34207133`, `517fa0cf`, `c44b9a7f`) are
   `main`'s `573f2457`, `a354fe49`, `1c8fc6e5`, `2f2a0c64`.
-- Tests: 444 after wave 1, 462 after wave 2.
+- Tests: 444 after wave 1, 462 after wave 2, 465 after wave 3.
 
 | id | sev | status | commit(s) on `integrate/wave2` |
 |---|---|---|---|

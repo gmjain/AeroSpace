@@ -15,6 +15,8 @@ Owner: Gaurav Jain. This file is the canonical record of what diverges and why.
   mechanics (no merge commits). Currently based on upstream `main` @ 74a1bf17 (untagged).
 - Features are developed on short-lived per-feature branches (e.g. `spawn-intent`, `auto-split`),
   verified, then ff-merged into `main`. **Always deploy `main`.**
+- Commit hashes cited in these docs predate the 2026-10-04 squash; they resolve via tag
+  `backup/main-pre-squash-2026-10-04` (pushed to origin).
 - Upstream update procedure: fetch into `upstream`, rebase `main`'s fork commits onto the new
   base, decide per-commit whether to keep or drop (features may have landed upstream).
 
@@ -197,9 +199,12 @@ failed timing-based attempts; see History below and docs/fork/HISTORY.md). Two f
   point (light sessions' `focusAfter`, FFM, spawn-intent placement, the guard push-backs,
   `garbageCollect`'s dead-window focus). Cleared by that confirmation (checked before the
   last-known comparison, since push-backs re-focus the already-known window), by physical input or
-  a hotkey (the user acted; what macOS reports next is theirs); after 3 re-asserts it stays as an
-  exhausted marker: no more re-asserts or push-backs to that window until confirmation,
-  input/hotkey, or a request for another window.
+  a hotkey (the user acted; what macOS reports next is theirs); superseded at rule 3 by an unspent
+  token granted after the event that caused the request (each request carries the `userInputSeq`
+  of its cause: `runLightSession` scopes it as a TaskLocal at session start, the heavy session it
+  schedules inherits it, a re-assert keeps it), since a session sends its request only after its
+  awaits; after 3 re-asserts it stays as an exhausted marker: no more re-asserts or push-backs to
+  that window until confirmation, input/hotkey, or a request for another window.
 - `userInputToken` — a physical input happened and no AeroSpace-observed effect has spent it.
   Granted by any mouse button going down, anywhere, and by the *release* of an app-switching chord
   (`focus-grant-chords`, default `['cmd-tab', 'cmd-shift-tab', 'cmd-backtick', 'cmd-space']`, hotkey
@@ -207,7 +212,9 @@ failed timing-based attempts; see History below and docs/fork/HISTORY.md). Two f
   activation rides the modifier release, so the token is granted on `flagsChanged` after the chord
   went down). Plain typing and cmd-c/v/s never grant one. A new input *replaces* the token; tokens
   never accumulate. Spent by the first observed effect: a hotkey binding firing
-  (`HotkeyBinding.swift`; spent inside its light session, after that session's updateFocusCache),
+  (`HotkeyBinding.swift`; spent inside its light session, after that session's updateFocusCache,
+  and only a token granted no later than the session's start: `userInputSeq <=
+  ownFocusCauseInputSeq`, so a cmd-tab released during its AX round trip keeps its token),
   `updateFocusCache` accepting a native focus change or a hidden-ws rejection (rules 3/4/6, spawn
   guard; `spent-by:reject:<rule>:<window>`, since 2026-10-04 wave 2: the rejected activation was
   the input's effect), or the focused window being closed (window destroyed; off-screen windows
@@ -229,7 +236,10 @@ as before, so a launcher panel never spends the cmd-space token):
 3. `stale-own-pending` — hidden ws while our own request is unanswered → reject, re-assert the
    pending window (≤ 3 per request; then give up: rules 4–6 still judge the report but reject it
    without pushing back to that window). A pending window the window server destroyed is not
-   re-asserted (rules 4–6 judge the report).
+   re-asserted (rules 4–6 judge the report). Skipped when an unspent token was granted after the
+   request's cause (alt-1, cmd-tab released before the alt-1 session asked macOS for W1): the
+   request is cleared (`superseded by later input` log line) and rules 4–6 judge, so rule 5
+   accepts. Input before the cause, or already spent, does not supersede it.
 4. `strict-app` — hidden ws, app in `focus-steal-guard-apps` → reject + push back (the list is now
    the *strict* list; the 2026-09-05 fixes stay: record the stolen window as the app's
    native-focused one before pushing back, accept when the focused workspace is empty). All
@@ -251,7 +261,9 @@ token, the placement set `pendingOwnFocus` → spawn guard / rule 3 / rule 4 / r
 every path; (m4) Chrome/Claude re-key after a close → close by hotkey: token already spent; close by
 click: the probe spends the token → rule 4/6 → push back to the next live window on the focused
 workspace (accepted if none). User: cmd-tab → chord release
-grants, the switcher's activation → rule 5; Dock click → mouse-down grants, the Dock is never
+grants, the switcher's activation → rule 5; also when cmd-tab follows an AeroSpace hotkey whose
+focus request is still unanswered (input after the request's cause supersedes rule 3; the hotkey
+does not spend that later token); Dock click → mouse-down grants, the Dock is never
 managed → rule 5; cmd-space → Enter → app: chord release grants, the launcher panel is a popup (no
 spend), its destruction is not the focused window (no spend), the app's hidden window → rule 5 (a
 freshly launched app's new window lands on the focused ws → rule 2); link click in the already
@@ -364,6 +376,9 @@ rm -f /opt/homebrew/bin/aerospace && cp .release/aerospace /opt/homebrew/bin/aer
 aerospace restart   # fork command: layouts survive
 ```
 
+Another Mac: [docs/fork/INSTALL.md](docs/fork/INSTALL.md) (copy a release build or clone and build;
+config, permissions, quarantine, signing).
+
 Gotchas (all learned in production):
 - **CLI path moved with Swift 6.4 (2026-10-04)**: the binary now lands in
   `.build/out/Products/Release/`, not `.build/arm64-apple-macosx/release/`. The old hard-coded
@@ -420,4 +435,3 @@ Gotchas (all learned in production):
 - Possibly upstream dump-tree/load-tree (#2173 and #57 are circling layout persistence).
 - Upstream PR sweep (adopt #2208, #2179 adapted) never executed: `docs/fork/upstream-prs.md`.
   WM focus-steal survey: `docs/fork/focus-steal-research.md` (both archival, 2026-08).
-- Disable fork-debug-log once the alt-l/ws4 steal is confirmed dead in daily use.

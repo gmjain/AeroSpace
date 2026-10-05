@@ -1,5 +1,8 @@
 # Fork history (harvested from past Claude sessions)
 
+Commit hashes cited in these docs predate the 2026-10-04 squash; they resolve via tag
+`backup/main-pre-squash-2026-10-04` (pushed to origin).
+
 Why things are the way they are. Feature detail lives in [FORK.md](../../FORK.md); open work in
 [tasks.md](../../tasks.md). Entries cite `session-id-prefix (project)`; find a session with
 `~/dump/tsearch <words>` (never grep the JSONL store). tsearch times are UTC; FORK.md dates
