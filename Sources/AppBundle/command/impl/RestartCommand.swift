@@ -29,19 +29,34 @@ struct RestartCommand: Command {
         }
         // The ServerAnswer is written only after the enclosing session finishes
         // (refreshModel + layoutWorkspaces: AX round-trips for every window,
-        // seconds when an app is slow). 300 ms lost that race: the CLI printed
-        // "Failed to read from server socket" and exited 1 although the restart
-        // went through.
-        // TODO(review-2026-09-05): proper fix is a @MainActor `terminateAfterAnswer`
-        // flag checked in server.swift newConnection() right after
-        // answerToClient(answer); server.swift is owned by another change right now.
-        Task.startUnstructured { @MainActor in
-            try? await Task.sleep(for: .milliseconds(1500))
-            terminationHandler?.beforeTermination()
-            terminateApp()
+        // seconds when an app is slow). A fixed delay (300 ms, then 1.5 s) lost
+        // that race: termination cut in at one of the session's awaits, the CLI
+        // printed "Failed to read from server socket" and exited 1 although the
+        // restart went through. A CLI session now terminates in server.swift
+        // right after its answer is written; nobody waits for an answer anywhere
+        // else (hotkey binding, menu), so terminate as soon as this turn yields.
+        if case .socketServer = refreshSessionEvent {
+            pendingRestartTermination = true
+        } else {
+            Task.startUnstructured { @MainActor in terminateForRestart() }
         }
         return .succ(io.out("Restarting AeroSpace..."))
     }
+}
+
+/// Set by `restart` inside a CLI (socket) session. server.swift newConnection() takes it right
+/// after the command returns, in the same main-actor turn (so a concurrent CLI session can't take
+/// it), and terminates once that session's answer is written.
+@MainActor private var pendingRestartTermination = false
+
+@MainActor func takePendingRestartTermination() -> Bool {
+    defer { pendingRestartTermination = false }
+    return pendingRestartTermination
+}
+
+@MainActor func terminateForRestart() -> Never {
+    terminationHandler?.beforeTermination()
+    terminateApp()
 }
 
 /// Bash script for the detached relauncher.
