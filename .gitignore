@@ -27,6 +27,13 @@
 !/Package.swift
 !/README.md
 
+# [FORK gmjain/AeroSpace] fork tooling: shared skills + agent definitions only
+# (worktrees and local settings under .claude stay ignored)
+!/.claude
+/.claude/*
+!/.claude/skills
+!/.claude/agents
+
 /xcode/.xcode-build
 
 # XCode User settings
