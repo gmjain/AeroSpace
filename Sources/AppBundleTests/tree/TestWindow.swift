@@ -6,7 +6,13 @@ final class TestWindow: Window, CustomStringConvertible {
     var isMacosFullscreenForTest = false
 
     @MainActor
-    private init(_ id: UInt32, _ parent: NonLeafTreeNodeObject, _ adaptiveWeight: CGFloat, _ rect: Rect?, _ app: TestApp) {
+    private init(
+        _ id: UInt32,
+        _ parent: NonLeafTreeNodeObject,
+        _ adaptiveWeight: CGFloat,
+        _ rect: Rect?,
+        _ app: TestApp, // [FORK gmjain/AeroSpace]
+    ) {
         _rect = rect
         super.init(id: id, app, lastFloatingSize: nil, parent: parent, adaptiveWeight: adaptiveWeight, index: INDEX_BIND_LAST)
     }

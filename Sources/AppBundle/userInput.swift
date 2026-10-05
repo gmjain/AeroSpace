@@ -165,8 +165,8 @@ let maxOwnFocusReasserts = 3
         pendingOwnFocus = nil
         return nil
     }
-    pushBackNativeFocus(from: stolen, to: window) // notes a fresh request for the window...
-    pendingOwnFocus = PendingOwnFocus(windowId: pending.windowId, reasserts: pending.reasserts + 1) // ...which is this re-assert
+    pushBackNativeFocus(from: stolen, to: window) // notes a fresh request for the window, which is this re-assert:
+    pendingOwnFocus = PendingOwnFocus(windowId: pending.windowId, reasserts: pending.reasserts + 1)
     return window
 }
 

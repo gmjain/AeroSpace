@@ -28,9 +28,9 @@ final class MacWindow: Window {
             macApp,
             isStartup
                 ? (rect?.center.monitorApproximation ?? mainMonitorInfo).activeWorkspace
-                : intent.map { Workspace.get(byName: $0.workspaceName) } ?? focus.workspace,
+                : intent.map { Workspace.get(byName: $0.workspaceName) } ?? focus.workspace, // [FORK gmjain/AeroSpace]
             window: nil,
-            anchor: intent?.windowId.flatMap { Window.get(byId: $0) },
+            anchor: intent?.windowId.flatMap { Window.get(byId: $0) }, // [FORK gmjain/AeroSpace]
             .cancellable,
         )
 
@@ -68,7 +68,8 @@ final class MacWindow: Window {
         if placedByIntent, let intent {
             if isSpawnIntentSupersededByInput(intent) {
                 forkDebugLog("spawnIntent: placed \(forkDebugDescribe(window)) per intent, NOT focused: user input "
-                    + "since the keypress [\(userInputStateForLog)] (session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
+                    + "since the keypress [\(userInputStateForLog)] "
+                    + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
             } else {
                 _ = window.focusWindow()
                 window.nativeFocus()
@@ -246,12 +247,13 @@ extension Window {
     func relayoutWindow(on workspace: Workspace, _ cm: CancellationMode, forceTile: Bool = false) async throws {
         let data = forceTile
             ? unbindAndGetBindingDataForNewTilingWindow(workspace, window: self)
-            : try await unbindAndGetBindingDataForNewWindow(self.asMacWindow().windowId, self.asMacWindow().macApp, workspace, window: self, anchor: nil, cm)
+            : try await unbindAndGetBindingDataForNewWindow(self.asMacWindow().windowId, self.asMacWindow().macApp, workspace, window: self, cm)
         bind(to: data.parent, adaptiveWeight: data.adaptiveWeight, index: data.index)
     }
 }
 
 // The function is private because it's unsafe. It leaves the window in unbound state
+// [FORK gmjain/AeroSpace] `anchor`: the spawn-intent window to split off, passed through to the tiling case
 @MainActor
 private func unbindAndGetBindingDataForNewWindow(_ windowId: UInt32, _ macApp: MacApp, _ workspace: Workspace, window: Window?, anchor: Window? = nil, _ cm: CancellationMode) async throws -> BindingData {
     let windowLevel = getWindowLevel(for: windowId)
@@ -263,6 +265,7 @@ private func unbindAndGetBindingDataForNewWindow(_ windowId: UInt32, _ macApp: M
 }
 
 // The function is private because it's unsafe. It leaves the window in unbound state
+// [FORK gmjain/AeroSpace] `anchor` parameter (spawn-intent)
 @MainActor
 private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: Window?, anchor: Window? = nil) -> BindingData {
     window?.unbindFromParent() // It's important to unbind to get correct data from below

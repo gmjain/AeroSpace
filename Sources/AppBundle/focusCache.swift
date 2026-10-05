@@ -1,4 +1,4 @@
-import Common
+import Common // [FORK gmjain/AeroSpace]
 
 @MainActor private var lastKnownNativeFocusedWindowId: UInt32? = nil
 
@@ -45,7 +45,7 @@ import Common
         _ = nativeFocused?.focusWindow()
         lastKnownNativeFocusedWindowId = nativeFocused?.windowId
     }
-    (nativeFocused?.app as? MacApp)?.lastNativeFocusedWindowId = nativeFocused?.windowId // as? : unit tests use TestApp
+    (nativeFocused?.app as? MacApp)?.lastNativeFocusedWindowId = nativeFocused?.windowId // [FORK gmjain/AeroSpace]
 }
 
 /// [FORK gmjain/AeroSpace] Decides whether a native focus change onto `window` (which differs from
@@ -95,8 +95,8 @@ import Common
             where prevId != window.windowId && Window.get(byId: prevId) != nil && !isWindowAliveInWindowServer(prevId)
         {
             let closed = forkDebugDescribe(Window.get(byId: prevId))
-            forkDebugLog("updateFocusCache: liveness probe: previously focused \(closed) is gone from the window server "
-                + "(alive=false) -> token spent as close before judging \(forkDebugDescribe(window)) "
+            forkDebugLog("updateFocusCache: liveness probe: previously focused \(closed) is gone from the "
+                + "window server (alive=false) -> token spent as close before judging \(forkDebugDescribe(window)) "
                 + "[\(userInputStateForLog)] (session: \(sessionTag))")
             consumeUserInputToken(by: "close:\(closed)")
             break
@@ -114,7 +114,7 @@ import Common
     return rejectOrAcceptHiddenWsSteal(window, reason: "no-input")
 }
 
-/// Reject a hidden-workspace native focus change and push macOS back to the focused window.
+/// [FORK gmjain/AeroSpace] Reject a hidden-workspace native focus change and push macOS back to the focused window.
 /// Returns true (accept) only when the focused workspace is empty and there is nothing to push
 /// back to: rejecting would leave the app frontmost with its window parked off-screen and
 /// keystrokes going nowhere visible (2026-09-05).
@@ -140,4 +140,5 @@ import Common
     return false
 }
 
+/// [FORK gmjain/AeroSpace] The refresh session event, for fork-debug-log lines.
 @MainActor private var sessionTag: String { refreshSessionEvent.map { "\($0)" } ?? "nil" }

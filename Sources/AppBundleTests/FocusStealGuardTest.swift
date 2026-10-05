@@ -239,7 +239,8 @@ final class FocusStealGuardTest: XCTestCase {
         updateFocusCache(placed)
         armSpawnFocusGuard(placed.windowId)
         // Another app re-keys a hidden-workspace window with nobody at the keyboard: rule 6 rejects it.
-        let otherHidden = TestWindow.new(id: 7, parent: Workspace.get(byName: "hidden").rootTilingContainer, app: .other)
+        let hiddenWs = Workspace.get(byName: "hidden")
+        let otherHidden = TestWindow.new(id: 7, parent: hiddenWs.rootTilingContainer, app: .other)
         updateFocusCache(otherHidden)
         assertEquals(focus.windowOrNil, placed)
         assertEquals(spawnFocusGuardWindowId, placed.windowId) // a rejected change is no reason to release
