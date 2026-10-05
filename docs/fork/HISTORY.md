@@ -219,3 +219,11 @@ mention "aerospace", all the unrelated word in application/openreview text, none
 - Deployed fork.15 = 9d0aabe9 (20:46). fork.14 kept for rollback in
   `~/.local/state/aerospace/rollback/fork.14-850dfa1c/`. Live: ws9 wrapper chain 12 -> 2.
 - Config 6a8abfb: `aerospace-state` uses `load-tree --stdin` and `aerospace restart` (R-04).
+
+**2026-10-05 (`748d7538`): repo moved; rift re-evaluated**
+- Fork clone moved to `~/software/github/wms/AeroSpace`, next to a rift clone (`wms/rift`).
+  Session paths in the table above are where those sessions ran (the old location).
+- Rift re-check (HEAD 3a99afa, v0.6.7): April/August blockers mostly fixed (binding modes,
+  multi-monitor flicker/sleep resets, FFM popups, dying hotkeys); still missing the event-order
+  steal guard, shared workspaces and workspace-to-display pinning (#124; open PR #545).
+  Decision: stay on the fork; optional time-boxed rift trial (rollback: dump-tree first).

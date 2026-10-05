@@ -9,7 +9,7 @@ Task tracker + orientation for the AeroSpace fork work. Companion to [FORK.md](F
 |---|---|
 | Config repo | `~/git/config` (git; **every logical change gets its own commit**) |
 | Live AeroSpace config | `~/git/config/aerospace/aerospace.toml` — reached via symlink `~/.config/aerospace` → `~/git/config/aerospace`; `auto-reload-config` is on, so **saving the file reloads it into the running server immediately** (never save fork-only keys the running server doesn't know yet) |
-| Fork clone | `~/software/github/AeroSpace` (origin = gmjain/AeroSpace, upstream = nikitabobko) |
+| Fork clone | `~/software/github/wms/AeroSpace` (moved 2026-10-05; sibling `../rift`) (origin = gmjain/AeroSpace, upstream = nikitabobko) |
 | Deployed app | `/Applications/AeroSpace.app` (self-signed "VoiceInk Local Self-Signed") |
 | Deployed CLI | `/opt/homebrew/bin/aerospace` (path hardcoded in all scripts; **rm before cp** on replace) |
 | State tool | `~/git/config/aerospace/scripts/aerospace-state` (save/restore/restart/trees; prefers native dump-tree/load-tree, falls back to geometry inference on vanilla) |
