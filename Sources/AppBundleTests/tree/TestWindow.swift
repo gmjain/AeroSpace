@@ -22,7 +22,7 @@ final class TestWindow: Window, CustomStringConvertible {
     nonisolated var description: String { "TestWindow(\(windowId))" }
 
     @MainActor
-    override func nativeFocus() {
+    override func nativeFocusImpl() { // [FORK gmjain/AeroSpace] Window.nativeFocus is final: notes the request first
         appForTests = TestApp.shared
         TestApp.shared.focusedWindow = self
     }

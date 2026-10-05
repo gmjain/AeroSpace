@@ -35,6 +35,23 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(focus.windowOrNil, visible)
         assertEquals(TestApp.shared.focusedWindow, visible) // pushed back
         assertTrue(Workspace.get(byName: "hidden").isVisible == false)
+        // The push-back is an own focus request like any other (Window.nativeFocus is the choke point).
+        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: 0))
+    }
+
+    /// macOS keeps reporting the stolen window: one push-back, `maxOwnFocusReasserts` re-asserts, then
+    /// give up. Each push-back used to start a fresh own request, so rule 3 and rule 6 alternated forever.
+    func testPushBackLoopTerminates() {
+        let (visible, hidden) = arrange()
+        let seqBefore = ownFocusRequestSeq
+        for _ in 1 ... 10 {
+            TestApp.shared.focusedWindow = hidden
+            updateFocusCache(hidden)
+            assertEquals(focus.windowOrNil, visible)
+        }
+        assertEquals(ownFocusRequestSeq - seqBefore, 1 + maxOwnFocusReasserts)
+        assertEquals(TestApp.shared.focusedWindow, hidden) // the last reports were rejected without a push-back
+        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: maxOwnFocusReasserts))
     }
 
     func testUserInputTokenAcceptsHiddenWsAndIsSpent() {
@@ -97,17 +114,29 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(focus.windowOrNil, visible)
     }
 
-    func testReassertBudgetThenNoInputRule() {
+    func testReassertBudgetThenGiveUp() {
         let (visible, hidden) = arrange()
         noteOwnFocusRequest(visible.windowId)
         for i in 1 ... maxOwnFocusReasserts {
             updateFocusCache(hidden) // rule 3
             assertEquals(pendingOwnFocus?.reasserts, i)
+            assertEquals(TestApp.shared.focusedWindow, visible) // re-asserted
         }
-        updateFocusCache(hidden) // budget spent -> rule 6
-        assertEquals(pendingOwnFocus, nil)
+        // Budget spent -> rule 6 still rejects, but no longer pushes back to the given-up window.
+        let seqBefore = ownFocusRequestSeq
+        TestApp.shared.focusedWindow = hidden
+        updateFocusCache(hidden)
         assertEquals(focus.windowOrNil, visible)
-        assertEquals(TestApp.shared.focusedWindow, visible)
+        assertEquals(TestApp.shared.focusedWindow, hidden)
+        assertEquals(ownFocusRequestSeq, seqBefore)
+        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: maxOwnFocusReasserts))
+        // macOS finally reports the requested window: confirmed, the give-up marker is gone.
+        TestApp.shared.focusedWindow = visible
+        updateFocusCache(visible)
+        assertEquals(pendingOwnFocus, nil)
+        // A fresh request for the same window gets a fresh budget.
+        noteOwnFocusRequest(visible.windowId)
+        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: 0))
     }
 
     func testOwnConfirmedAcceptsHiddenWs() {

@@ -9,11 +9,14 @@ import HotKey
 // instance re-keying a hidden window, an app re-keying after one of its windows closed, a stale
 // report of AeroSpace's own activation). Two facts, ordered by events — never by elapsed time:
 //
-//   * pendingOwnFocus — the window AeroSpace last asked macOS to focus (MacWindow.nativeFocus is the
+//   * pendingOwnFocus — the window AeroSpace last asked macOS to focus (Window.nativeFocus is the
 //     single choke point) and has not yet seen macOS report back. While it is set, a native focus
 //     report pointing at a hidden workspace is a stale/transient answer to our own request.
-//     Cleared when macOS reports that exact window, when physical input or a hotkey arrives (the
-//     user acted; what macOS reports next is theirs), or after `maxOwnFocusReasserts` re-asserts.
+//     Cleared when macOS reports that exact window or when physical input or a hotkey arrives (the
+//     user acted; what macOS reports next is theirs); replaced by a request for another window.
+//     After `maxOwnFocusReasserts` re-asserts it stays as an exhausted marker: no more re-asserts
+//     and no more push-backs to that window (every push-back is itself a new own request, so
+//     clearing it let rule 3 / rule 6 ping-pong forever).
 //
 //   * userInputToken — a physical input event happened and no AeroSpace-observed effect has spent
 //     it yet. Granted by a mouse button going down (any button, anywhere) and by the RELEASE of a
@@ -116,6 +119,9 @@ private let chordModifierMask: NSEvent.ModifierFlags = [.command, .control, .opt
 struct PendingOwnFocus: Equatable {
     let windowId: UInt32
     var reasserts: Int
+    /// The re-assert budget is spent: updateFocusCache gave up on this request. Kept, not cleared, so
+    /// rules 4/6 don't restart the cycle with a fresh push-back to the same window.
+    var isExhausted: Bool { reasserts >= maxOwnFocusReasserts }
 }
 
 /// After this many re-asserts of an unconfirmed own request updateFocusCache gives up on it.
@@ -127,11 +133,11 @@ let maxOwnFocusReasserts = 3
 /// sync raise when the session body already asked macOS for the very window it would raise.
 @MainActor private(set) var ownFocusRequestSeq: Int = 0
 
-/// Called from the single place where AeroSpace asks macOS to focus a window (MacWindow.nativeFocus).
-/// Re-asserting the same window keeps its re-assert counter; a different window starts a new request.
+/// Called from the single place where AeroSpace asks macOS to focus a window (Window.nativeFocus).
+/// Every request starts with a fresh re-assert budget, even for the same window (a new FFM raise or
+/// CLI `focus` is a new request); reassertPendingOwnFocus restores its own count afterwards.
 @MainActor func noteOwnFocusRequest(_ windowId: UInt32) {
     ownFocusRequestSeq += 1
-    if pendingOwnFocus?.windowId == windowId { return }
     pendingOwnFocus = PendingOwnFocus(windowId: windowId, reasserts: 0)
 }
 
@@ -146,17 +152,17 @@ let maxOwnFocusReasserts = 3
     pendingOwnFocus = nil
 }
 
-/// Asks macOS again for the pending window. Returns the window when the request was re-issued;
-/// nil (and clears the request) when the window is gone or the re-assert budget is spent.
+/// Asks macOS again for the pending window. Returns the window when the request was re-issued; nil
+/// when there is nothing to re-assert: no request, the budget is spent (the request stays, exhausted),
+/// or the window is gone (the request is cleared).
 @MainActor func reassertPendingOwnFocus() -> Window? {
-    guard var pending = pendingOwnFocus else { return nil }
-    guard pending.reasserts < maxOwnFocusReasserts, let window = Window.get(byId: pending.windowId) else {
+    guard let pending = pendingOwnFocus, !pending.isExhausted else { return nil }
+    guard let window = Window.get(byId: pending.windowId) else {
         pendingOwnFocus = nil
         return nil
     }
-    pending.reasserts += 1
-    pendingOwnFocus = pending
-    window.nativeFocus() // goes through noteOwnFocusRequest, which keeps the counter for the same window
+    window.nativeFocus() // notes a fresh request for the window...
+    pendingOwnFocus = PendingOwnFocus(windowId: pending.windowId, reasserts: pending.reasserts + 1) // ...which is this re-assert
     return window
 }
 

@@ -142,10 +142,7 @@ final class MacWindow: Window {
     override func isMacosFullscreen(_ cm: CancellationMode) async throws -> Bool { try await macApp.isMacosNativeFullscreen(windowId, cm) == true }
     override func isMacosMinimized(_ cm: CancellationMode) async throws -> Bool { try await macApp.isMacosNativeMinimized(windowId, cm) == true }
 
-    @MainActor override func nativeFocus() {
-        // [FORK gmjain/AeroSpace] the single choke point where AeroSpace asks macOS to focus a
-        // window: remember the request until macOS reports it back (see userInput.swift).
-        if !serverArgs.isReadOnly { noteOwnFocusRequest(windowId) }
+    @MainActor override func nativeFocusImpl() { // [FORK gmjain/AeroSpace] was nativeFocus(), see Window
         macApp.nativeFocus(windowId)
     }
 

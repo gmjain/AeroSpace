@@ -75,16 +75,14 @@ import Common
         return true
     }
     // 3. stale-own-pending
-    if pendingOwnFocus != nil {
-        if let reasserted = reassertPendingOwnFocus() {
-            forkDebugLog("updateFocusCache: REJECTED hidden-ws focus by \(forkDebugDescribe(window)) "
-                + "[stale-own-pending; re-assert \(pendingOwnFocus?.reasserts ?? 0)/\(maxOwnFocusReasserts) "
-                + "of \(forkDebugDescribe(reasserted)); \(userInputStateForLog)] (session: \(sessionTag))")
-            return false
-        }
-        // The pending window is gone or its re-assert budget is spent: fall through to the
-        // input-based rules with no pending request.
+    if let reasserted = reassertPendingOwnFocus() {
+        forkDebugLog("updateFocusCache: REJECTED hidden-ws focus by \(forkDebugDescribe(window)) "
+            + "[stale-own-pending; re-assert \(pendingOwnFocus?.reasserts ?? 0)/\(maxOwnFocusReasserts) "
+            + "of \(forkDebugDescribe(reasserted)); \(userInputStateForLog)] (session: \(sessionTag))")
+        return false
     }
+    // No pending request, its window is gone, or its re-assert budget is spent (given up): fall through
+    // to the input-based rules. An exhausted request stays set so they won't push back to it again.
     // 4. strict-app
     if config.focusStealGuardApps.contains(window.app.rawAppBundleId ?? "") {
         return rejectOrAcceptHiddenWsSteal(window, reason: "strict-app")
@@ -126,6 +124,14 @@ import Common
             + "[\(reason); focused ws \(focus.workspace.name) is empty, nothing to push back to; "
             + "\(userInputStateForLog)] (session: \(sessionTag))")
         return true
+    }
+    // Gave up on pushing back to this window (rule 3 spent the re-assert budget): every push-back is a
+    // new own request, so pushing again would restart the rule 3 / rule 6 cycle forever. Still rejected.
+    if let pending = pendingOwnFocus, pending.isExhausted, pending.windowId == pushBackTo.windowId {
+        forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(window)) "
+            + "[\(reason); gave up pushing back to \(forkDebugDescribe(pushBackTo)) after "
+            + "\(maxOwnFocusReasserts) re-asserts; \(userInputStateForLog)] (session: \(sessionTag))")
+        return false
     }
     forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(window)) "
         + "[\(reason); push back to \(forkDebugDescribe(pushBackTo)); \(userInputStateForLog)] "
