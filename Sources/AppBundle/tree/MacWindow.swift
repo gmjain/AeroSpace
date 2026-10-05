@@ -379,7 +379,11 @@ func flattenRedundantAutoSplitWrappers(_ container: TilingContainer) {
     }
     guard let only = container.children.singleOrNil(),
           container.isAutoSplitWrapper || (config.autoSplitByAspect && only is TilingContainer) else { return }
-    if container.parent is TilingContainer {
+    if let grandparent = container.parent as? TilingContainer {
+        // Opposite-orientation normalization runs right after this step: a container lifted into a parent of its
+        // own orientation would be flipped (its windows re-split the other way). Keep that level: layout-neutral.
+        if config.enableNormalizationOppositeOrientationForNestedContainers,
+           (only as? TilingContainer)?.orientation == grandparent.orientation { return }
         dropAutoSplitWrapperIfRedundant(container)
     } else if let only = only as? TilingContainer, let workspace = container.parent as? Workspace {
         // Root container: its only child container becomes the root. A lone window stays (a Workspace may only

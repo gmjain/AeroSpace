@@ -179,6 +179,28 @@ final class AutoSplitByAspectTest: XCTestCase {
         assertEquals(workspace.mostRecentWindowRecursive?.windowId, 1)
     }
 
+    /// With opposite-orientation normalization on, lifting a container into a parent of its own orientation
+    /// would get it flipped right after (1 and 2 stacked instead of side by side): that level stays.
+    func testCollapseKeepsLayoutWithOppositeOrientationNormalization() async throws {
+        config.enableNormalizationOppositeOrientationForNestedContainers = true
+        let workspace = Workspace.get(byName: name)
+        workspace.rootTilingContainer.apply {
+            TilingContainer.newVTiles(parent: $0, adaptiveWeight: 1, index: INDEX_BIND_LAST).apply {
+                $0.isAutoSplitWrapper = true
+                TilingContainer.newHTiles(parent: $0, adaptiveWeight: 1, index: INDEX_BIND_LAST).apply {
+                    TestWindow.new(id: 1, parent: $0)
+                    TestWindow.new(id: 2, parent: $0)
+                }
+            }
+            TestWindow.new(id: 3, parent: $0)
+        }
+        workspace.normalizeContainers()
+        assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([
+            .v_tiles([.h_tiles([.window(1), .window(2)])]),
+            .window(3),
+        ]))
+    }
+
     /// Upstream behavior for flatten-off users without auto-split: untagged single-child containers stay. A
     /// tagged wrapper is still the fork's own and is flattened.
     func testUntaggedSingleChildContainersKeptWithAutoSplitOff() async throws {
