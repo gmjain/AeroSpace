@@ -106,6 +106,7 @@ import Common // [FORK gmjain/AeroSpace]
         forkDebugLog("updateFocusCache: REJECTED hidden-ws focus by \(forkDebugDescribe(window)) "
             + "[stale-own-pending; re-assert \(pendingOwnFocus?.reasserts ?? 0)/\(maxOwnFocusReasserts) "
             + "of \(forkDebugDescribe(reasserted)); \(userInputStateForLog)] (session: \(sessionTag))")
+        spendUserInputTokenOnRejection(of: window, reason: "stale-own-pending")
         return false
     }
     // No pending request, its window is gone, or its re-assert budget is spent (given up): fall through
@@ -155,6 +156,7 @@ import Common // [FORK gmjain/AeroSpace]
         forkDebugLog("updateFocusCache: ACCEPTED hidden-ws focus by \(forkDebugDescribe(window)) "
             + "[\(reason); \(why), nothing to push back to; "
             + "\(userInputStateForLog)] (session: \(sessionTag))")
+        consumeUserInputToken(by: "accept:\(forkDebugDescribe(window))")
         return true
     }
     // Gave up on pushing back to this window (rule 3 spent the re-assert budget): every push-back is a
@@ -163,13 +165,23 @@ import Common // [FORK gmjain/AeroSpace]
         forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(window)) "
             + "[\(reason); gave up pushing back to \(forkDebugDescribe(pushBackTo)) after "
             + "\(maxOwnFocusReasserts) re-asserts; \(userInputStateForLog)] (session: \(sessionTag))")
+        spendUserInputTokenOnRejection(of: window, reason: reason)
         return false
     }
     forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(window)) "
         + "[\(reason); push back to \(forkDebugDescribe(pushBackTo)); \(userInputStateForLog)] "
         + "(session: \(sessionTag))")
     pushBackNativeFocus(from: window, to: pushBackTo)
+    spendUserInputTokenOnRejection(of: window, reason: reason)
     return false
+}
+
+/// [FORK gmjain/AeroSpace] A rejected hidden-ws activation spends the token like an accepted one
+/// (R-2026-10-04-06): it was the first observed effect of the input (a link clicked in Slack activating
+/// strict-list Chrome). Surviving the rejection, the token let the next machine re-key (WhatsApp, minutes
+/// later) through rule 5. Rule 6 has no token to spend; called there anyway for the uniform log tag.
+@MainActor func spendUserInputTokenOnRejection(of window: Window, reason: String) {
+    consumeUserInputToken(by: "reject:\(reason):\(forkDebugDescribe(window))")
 }
 
 /// [FORK gmjain/AeroSpace] Where rules 4/6 push macOS back to: the focused window, unless the window server

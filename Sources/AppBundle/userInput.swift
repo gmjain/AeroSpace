@@ -23,7 +23,8 @@ import HotKey
 //     configured app-switching chord (`focus-grant-chords`: cmd-tab, cmd-shift-tab, cmd-backtick,
 //     cmd-space by default — the activation rides the modifier release). Plain typing, cmd-c/v/s,
 //     never grant one. A new input replaces the token; tokens never accumulate. Spent by the first
-//     effect: a hotkey binding firing, updateFocusCache accepting a native focus change, or the
+//     effect: a hotkey binding firing, updateFocusCache accepting a native focus change or
+//     rejecting a hidden-workspace one (rules 3/4/6, the spawn guard; R-2026-10-04-06), or the
 //     focused window being closed (the close was what the click/hotkey did; the app's re-key
 //     afterwards is machine-caused).
 //

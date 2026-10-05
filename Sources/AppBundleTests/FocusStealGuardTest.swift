@@ -96,7 +96,37 @@ final class FocusStealGuardTest: XCTestCase {
         updateFocusCache(hidden) // rule 4 comes before rule 5
         assertEquals(focus.windowOrNil, visible)
         assertEquals(TestApp.shared.focusedWindow, visible)
-        assertEquals(userInputToken, true) // not spent by a rejection
+        // R-2026-10-04-06: the rejected activation was the input's effect: spent, so a later machine
+        // re-key (WhatsApp, not on the strict list) can't ride it through rule 5.
+        assertEquals(userInputToken, false)
+        assertEquals(lastUserInputSpentBy?.hasPrefix("reject:strict-app:"), true)
+        updateFocusCache(visible) // macOS took the push-back: nothing pending
+        assertEquals(pendingOwnFocus, nil)
+        let other = TestWindow.new(id: 3, parent: Workspace.get(byName: "other").rootTilingContainer, app: .other)
+        updateFocusCache(other) // rule 6, not rule 5
+        assertEquals(focus.windowOrNil, visible)
+    }
+
+    /// R-2026-10-04-06: rule 3 and the spawn guard spend the token too.
+    func testRejectionsSpendToken() {
+        let (visible, hidden) = arrange()
+        grantUserInputToken(.mouseDown(.leftMouseDown))
+        noteOwnFocusRequest(visible.windowId) // AeroSpace asked for `visible` after the click
+        updateFocusCache(hidden) // rule 3
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(userInputToken, false)
+        assertEquals(lastUserInputSpentBy?.hasPrefix("reject:stale-own-pending:"), true)
+
+        // A token left over from before the guard was armed (cmd-modified hotkey, limitation 3).
+        let placed = TestWindow.new(id: 6, parent: focus.workspace.rootTilingContainer)
+        _ = placed.focusWindow()
+        updateFocusCache(placed)
+        grantUserInputToken(.chord("cmd-tab"))
+        armSpawnFocusGuard(placed.windowId)
+        updateFocusCache(visible) // same-app steal
+        assertEquals(focus.windowOrNil, placed)
+        assertEquals(userInputToken, false)
+        assertEquals(lastUserInputSpentBy?.hasPrefix("reject:spawn-guard:"), true)
     }
 
     func testStaleReportWhileOwnRequestPendingIsRejectedAndReasserted() {

@@ -189,5 +189,6 @@ let maxSpawnFocusGuardRefires = 3
         + "[refire \(guard_.refires)/\(maxSpawnFocusGuardRefires) of \(forkDebugDescribe(guarded))] "
         + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
     pushBackNativeFocus(from: nativeFocused, to: guarded)
+    spendUserInputTokenOnRejection(of: nativeFocused, reason: "spawn-guard") // R-2026-10-04-06
     return true
 }
