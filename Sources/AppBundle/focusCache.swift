@@ -75,7 +75,7 @@ import Common
         return true
     }
     // 3. stale-own-pending
-    if let reasserted = reassertPendingOwnFocus() {
+    if let reasserted = reassertPendingOwnFocus(stolen: window) {
         forkDebugLog("updateFocusCache: REJECTED hidden-ws focus by \(forkDebugDescribe(window)) "
             + "[stale-own-pending; re-assert \(pendingOwnFocus?.reasserts ?? 0)/\(maxOwnFocusReasserts) "
             + "of \(forkDebugDescribe(reasserted)); \(userInputStateForLog)] (session: \(sessionTag))")
@@ -136,13 +136,7 @@ import Common
     forkDebugLog("updateFocusCache: REJECTED hidden-ws steal by \(forkDebugDescribe(window)) "
         + "[\(reason); push back to \(forkDebugDescribe(pushBackTo)); \(userInputStateForLog)] "
         + "(session: \(sessionTag))")
-    // Record what macOS actually focused before pushing back. MacApp.nativeFocus skips the
-    // AX raise and only calls nsApp.activate when it believes the target is already the app's
-    // focused window (single monitor). For a same-app steal (Chrome cmd-` onto a hidden
-    // window) the app is already active, so that shortcut was a no-op and macOS stayed on
-    // the hidden window while every following refresh session re-rejected it (2026-09-05).
-    (window.app as? MacApp)?.lastNativeFocusedWindowId = window.windowId
-    pushBackTo.nativeFocus()
+    pushBackNativeFocus(from: window, to: pushBackTo)
     return false
 }
 

@@ -152,18 +152,30 @@ let maxOwnFocusReasserts = 3
     pendingOwnFocus = nil
 }
 
-/// Asks macOS again for the pending window. Returns the window when the request was re-issued; nil
-/// when there is nothing to re-assert: no request, the budget is spent (the request stays, exhausted),
-/// or the window is gone (the request is cleared).
-@MainActor func reassertPendingOwnFocus() -> Window? {
+/// Asks macOS again for the pending window after rejecting a report of `stolen`. Returns the window
+/// when the request was re-issued; nil when there is nothing to re-assert: no request, the budget is
+/// spent (the request stays, exhausted), or the window is gone (the request is cleared).
+@MainActor func reassertPendingOwnFocus(stolen: Window) -> Window? {
     guard let pending = pendingOwnFocus, !pending.isExhausted else { return nil }
     guard let window = Window.get(byId: pending.windowId) else {
         pendingOwnFocus = nil
         return nil
     }
-    window.nativeFocus() // notes a fresh request for the window...
+    pushBackNativeFocus(from: stolen, to: window) // notes a fresh request for the window...
     pendingOwnFocus = PendingOwnFocus(windowId: pending.windowId, reasserts: pending.reasserts + 1) // ...which is this re-assert
     return window
+}
+
+/// Pushes macOS focus back to `target` after a native focus change onto `stolen` was rejected: rule 3
+/// re-asserts, rules 4/6, the spawn focus guard. Records what macOS actually focused first:
+/// MacApp.nativeFocus skips the AX raise and only calls nsApp.activate when it believes the target
+/// already is the app's focused window (single monitor). For a same-app steal (Chrome cmd-` onto a
+/// hidden window, a WezTerm instance re-keying the anchor window) the app is already active, so that
+/// shortcut was a no-op and macOS stayed on the stolen window while every following refresh session
+/// re-rejected it (2026-09-05; rule 3 and the spawn guard skipped the record until 2026-10-04).
+@MainActor func pushBackNativeFocus(from stolen: Window, to target: Window) {
+    (stolen.app as? MacApp)?.lastNativeFocusedWindowId = stolen.windowId // as? : unit tests use TestApp
+    target.nativeFocus()
 }
 
 // --------------------------------------------------------- liveness probe

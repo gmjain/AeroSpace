@@ -126,6 +126,6 @@ let maxSpawnFocusGuardRefires = 3
     forkDebugLog("spawnFocusGuard: REJECTED same-app steal by \(forkDebugDescribe(nativeFocused)) "
         + "[refire \(guard_.refires)/\(maxSpawnFocusGuardRefires) of \(forkDebugDescribe(guarded))] "
         + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
-    guarded.nativeFocus()
+    pushBackNativeFocus(from: nativeFocused, to: guarded)
     return true
 }
