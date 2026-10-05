@@ -344,9 +344,9 @@ func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: W
 // [FORK gmjain/AeroSpace] auto-split-by-aspect: `wrapper` was created to hold the MRU window plus
 // one new window. If it is left with a single child, hand that child the wrapper's own binding
 // (weight + index in the grandparent) and drop the wrapper. MRU bookkeeping mirrors
-// unbindEmptyAndAutoFlatten. Safe on any tree state: only bound nodes are unbound.
+// unbindEmptyAndAutoFlatten. Safe on any tree state: only bound nodes are unbound. Internal for tests.
 @MainActor
-private func dropAutoSplitWrapperIfRedundant(_ wrapper: TilingContainer?) {
+func dropAutoSplitWrapperIfRedundant(_ wrapper: TilingContainer?) {
     // The grandparent must be a TilingContainer: binding a window straight under a Workspace dies.
     guard let wrapper, let grandparent = wrapper.parent as? TilingContainer, let child = wrapper.children.singleOrNil() else { return }
     let mru = grandparent.mostRecentChild
