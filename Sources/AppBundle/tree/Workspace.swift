@@ -128,18 +128,7 @@ extension MonitorInfo {
 
     @MainActor
     func setActiveWorkspace(_ workspace: Workspace) -> Bool {
-        // [FORK gmjain/AeroSpace] fork-debug-log: trace every monitor active-workspace change. With
-        // logging off this is upstream's one-liner. The cache is read directly: the activeWorkspace
-        // getter rearranges monitors on a cache miss, a side effect this setter must not gain.
-        guard config.forkDebugLog else { return rect.topLeftCorner.setActiveWorkspace(workspace) }
-        let before = screenPointToVisibleWorkspace[rect.topLeftCorner]
-        let assigned = rect.topLeftCorner.setActiveWorkspace(workspace)
-        if assigned, before != workspace {
-            forkDebugLog("setActiveWorkspace: monitor \(monitorId_oneBased?.description ?? "?") "
-                + "\(before?.name ?? "nil") -> \(workspace.name) "
-                + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
-        }
-        return assigned
+        rect.topLeftCorner.setActiveWorkspace(workspace)
     }
 }
 
@@ -155,6 +144,17 @@ extension CGPoint {
     fileprivate func setActiveWorkspace(_ workspace: Workspace) -> Bool {
         if !isValidAssignment(workspace: workspace, screen: self) {
             return false
+        }
+        // [FORK gmjain/AeroSpace] fork-debug-log: every assignment path funnels through here (MonitorInfo's
+        // setter, rearrangeWorkspacesOnMonitors), so this is where monitor changes are traced. The caches are
+        // read directly: the activeWorkspace getter rearranges monitors on a miss. Off: one Bool read.
+        if config.forkDebugLog && !forkDebugLogIsRearranging {
+            forkDebugLogActiveWorkspaceChange(
+                monitor: self,
+                from: screenPointToVisibleWorkspace[self],
+                to: workspace,
+                leaving: visibleWorkspaceToScreenPoint[workspace],
+            )
         }
         if let prevMonitorPoint = visibleWorkspaceToScreenPoint[workspace] {
             visibleWorkspaceToScreenPoint.removeValue(forKey: workspace)
@@ -191,6 +191,14 @@ private func rearrangeWorkspacesOnMonitors() {
     let oldScreenPointToVisibleWorkspace = screenPointToVisibleWorkspace
     screenPointToVisibleWorkspace = [:]
     visibleWorkspaceToScreenPoint = [:]
+    // [FORK gmjain/AeroSpace] fork-debug-log: one summary line instead of a "nil -> X" line per monitor
+    forkDebugLogIsRearranging = true
+    defer {
+        forkDebugLogIsRearranging = false
+        if config.forkDebugLog {
+            forkDebugLogRearrangement(from: oldScreenPointToVisibleWorkspace, to: screenPointToVisibleWorkspace)
+        }
+    }
 
     for newScreen in newScreens {
         if let existingVisibleWorkspace = newScreenToOldScreenMapping[newScreen].flatMap({ oldScreenPointToVisibleWorkspace[$0] }),

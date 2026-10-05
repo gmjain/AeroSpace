@@ -1,4 +1,5 @@
 import AppKit
+import Common
 import Foundation
 
 // [FORK gmjain/AeroSpace] opt-in tracing for focus/workspace forensics.
@@ -14,10 +15,13 @@ import Foundation
 /// every line.
 @MainActor private var forkDebugLogBroken = false
 
-// DateFormatter construction is expensive; build it once (2026-09-05 review fix).
+// DateFormatter construction is expensive; build it once (2026-09-05 review fix). ISO 8601 local time with the
+// date, so a week of logs can be split by day (R-2026-10-04-09; lines before 2026-10-04 have only HH:mm:ss.SSS).
+// en_US_POSIX: a fixed format must not follow the user's calendar / 12-hour settings.
 @MainActor private let forkDebugLogTimeFormatter: DateFormatter = {
     let fmt = DateFormatter()
-    fmt.dateFormat = "HH:mm:ss.SSS"
+    fmt.locale = Locale(identifier: "en_US_POSIX")
+    fmt.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
     return fmt
 }()
 
@@ -82,4 +86,64 @@ private func isUnlinked(_ handle: FileHandle) -> Bool {
     guard let window else { return "nil" }
     let ws = window.nodeWorkspace?.name ?? "?"
     return "\(window.windowId)/\(window.app.name ?? window.app.rawAppBundleId ?? "?")@ws\(ws)"
+}
+
+// ------------------------------------------------------------- monitor active-workspace changes
+
+/// Set while rearrangeWorkspacesOnMonitors reassigns every monitor: it logs one summary line instead of a
+/// "nil -> X" line per monitor.
+@MainActor var forkDebugLogIsRearranging = false
+
+/// One CGPoint.setActiveWorkspace. A workspace that was visible on another monitor leaves that monitor
+/// without a visible workspace until something fills it: logged as its own line, so every monitor's
+/// sequence of workspaces can be followed (R-2026-10-04-09).
+@MainActor func forkDebugLogActiveWorkspaceChange(
+    monitor: CGPoint, from before: Workspace?, to workspace: Workspace, leaving prevMonitor: CGPoint?,
+) {
+    let labels = forkDebugMonitorLabels()
+    if let prevMonitor, prevMonitor != monitor {
+        forkDebugLog("setActiveWorkspace: monitor \(labels(prevMonitor)) \(workspace.name) -> nil "
+            + "(moved to monitor \(labels(monitor))) (session: \(forkDebugSessionDescription))")
+    }
+    if before != workspace {
+        forkDebugLog("setActiveWorkspace: monitor \(labels(monitor)) \(before?.name ?? "nil") -> \(workspace.name) "
+            + "(session: \(forkDebugSessionDescription))")
+    }
+}
+
+/// rearrangeWorkspacesOnMonitors (monitor plugged/unplugged/moved, or a cache miss in the activeWorkspace
+/// getter) rebuilt the monitor -> workspace mapping from scratch.
+@MainActor func forkDebugLogRearrangement(from before: [CGPoint: Workspace], to after: [CGPoint: Workspace]) {
+    let labels = forkDebugMonitorLabels()
+    let summary = forkDebugRearrangementSummary(
+        before: Dictionary(before.map { (labels($0.key), $0.value.name) }, uniquingKeysWith: { a, _ in a }),
+        after: Dictionary(after.map { (labels($0.key), $0.value.name) }, uniquingKeysWith: { a, _ in a }),
+    )
+    if let summary {
+        forkDebugLog("\(summary) (session: \(forkDebugSessionDescription))")
+    }
+}
+
+/// Monitor label -> visible workspace name, before and after. Nil when nothing changed. Internal for tests.
+func forkDebugRearrangementSummary(before: [String: String], after: [String: String]) -> String? {
+    let changes = Set(before.keys).union(after.keys).sorted().compactMap { monitor in
+        before[monitor] == after[monitor]
+            ? nil
+            : "monitor \(monitor) \(before[monitor] ?? "nil") -> \(after[monitor] ?? "nil")"
+    }
+    return changes.isEmpty ? nil : "rearrangeWorkspacesOnMonitors: " + changes.joined(separator: ", ")
+}
+
+/// A monitor's top-left corner -> its 1-based id (list-monitors numbering), or the corner itself when no
+/// current monitor is there (it was unplugged or moved).
+@MainActor private func forkDebugMonitorLabels() -> (CGPoint) -> String {
+    let ids = Dictionary(
+        sortedMonitorInfos.enumerated().map { ($0.element.rect.topLeftCorner, $0.offset + 1) },
+        uniquingKeysWith: { a, _ in a },
+    )
+    return { point in ids[point].map(String.init) ?? "(\(Int(point.x)),\(Int(point.y)))" }
+}
+
+@MainActor private var forkDebugSessionDescription: String {
+    refreshSessionEvent.map { "\($0)" } ?? "nil"
 }
