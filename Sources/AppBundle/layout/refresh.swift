@@ -86,7 +86,8 @@ private func runLightSessionImpl<T>( // [FORK gmjain/AeroSpace] renamed, see run
         let focusBefore = focus.windowOrNil
 
         await refreshModel_nonCancellable()
-        let result = try await body()
+        // [FORK gmjain/AeroSpace] spawn-intent: re-anchor after a CLI command that moved focus
+        let result = try await runRecordingSpawnIntentIfCliMovedFocus(event, body: body)
         await refreshModel_nonCancellable()
 
         let focusAfter = focus.windowOrNil
