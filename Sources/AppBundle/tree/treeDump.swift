@@ -15,7 +15,10 @@ struct TreeDump: Codable, Sendable {
 
 struct WorkspaceDump: Codable, Sendable {
     var name: String
-    var monitorId: Int? = nil // 1-based, same numbering as list-workspaces
+    var monitorId: Int? = nil // 1-based, same numbering as list-workspaces; fallback, see dumpedMonitor
+    var monitorName: String? = nil
+    var monitorTopLeftX: Double? = nil
+    var monitorTopLeftY: Double? = nil
     var visible: Bool = false
     var focused: Bool = false
     var root: NodeDump? = nil
@@ -55,6 +58,9 @@ extension WorkspaceDump {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
         monitorId = try c.decodeIfPresent(Int.self, forKey: .monitorId)
+        monitorName = try c.decodeIfPresent(String.self, forKey: .monitorName)
+        monitorTopLeftX = try c.decodeIfPresent(Double.self, forKey: .monitorTopLeftX)
+        monitorTopLeftY = try c.decodeIfPresent(Double.self, forKey: .monitorTopLeftY)
         visible = try c.decodeIfPresent(Bool.self, forKey: .visible) ?? false
         focused = try c.decodeIfPresent(Bool.self, forKey: .focused) ?? false
         root = try c.decodeIfPresent(NodeDump.self, forKey: .root)
@@ -71,7 +77,11 @@ extension WorkspaceDump {
     dump.focusedWindowId = focus.windowOrNil?.windowId
     for workspace in Workspace.all {
         var ws = WorkspaceDump(name: workspace.name)
-        ws.monitorId = workspace.workspaceMonitor.monitorId_oneBased
+        let monitor = workspace.workspaceMonitor
+        ws.monitorId = monitor.monitorId_oneBased
+        ws.monitorName = monitor.name
+        ws.monitorTopLeftX = Double(monitor.rect.topLeftX)
+        ws.monitorTopLeftY = Double(monitor.rect.topLeftY)
         ws.visible = workspace.isVisible
         ws.focused = focus.workspace == workspace
         ws.root = dumpNode(workspace.rootTilingContainer, isMru: false)
@@ -141,11 +151,11 @@ extension WorkspaceDump {
 @MainActor func loadTree(_ dump: TreeDump) async {
     // 1) Workspace -> monitor. Every setActiveWorkspace makes the workspace
     // visible on its monitor; the correct visible set is restored in step 3.
+    let monitors = sortedMonitorInfos
     for wsDump in dump.workspaces {
-        guard let mid = wsDump.monitorId else { continue }
+        guard let monitor = dumpedMonitor(wsDump, among: monitors) else { continue }
         let workspace = Workspace.get(byName: wsDump.name)
-        if workspace.workspaceMonitor.monitorId_oneBased != mid,
-           let monitor = sortedMonitorInfos.first(where: { $0.monitorId_oneBased == mid }) {
+        if workspace.workspaceMonitor.rect.topLeftCorner != monitor.rect.topLeftCorner {
             _ = monitor.setActiveWorkspace(workspace)
         }
     }
@@ -208,6 +218,23 @@ extension WorkspaceDump {
     if let wid = dump.focusedWindowId, let window = Window.get(byId: wid) {
         _ = window.focusWindow()
     }
+}
+
+/// The live monitor a workspace was dumped on. Indices shift whenever a monitor is plugged in left
+/// of another (they are sorted by position), so prefer, in order: same name and top-left corner;
+/// the only monitor with that name (rearranged); the monitor at that corner (swapped for another
+/// model); the dumped 1-based index (also all dumps written before name/corner were recorded).
+func dumpedMonitor(_ wsDump: WorkspaceDump, among sortedMonitors: [MonitorInfo]) -> MonitorInfo? {
+    let corner = wsDump.monitorTopLeftX.flatMap { x in wsDump.monitorTopLeftY.map { CGPoint(x: x, y: $0) } }
+    if let name = wsDump.monitorName {
+        if let corner, let match = sortedMonitors.first(where: { $0.name == name && $0.rect.topLeftCorner == corner }) {
+            return match
+        }
+        if let match = sortedMonitors.singleOrNil(where: { $0.name == name }) { return match }
+    }
+    if let corner, let match = sortedMonitors.first(where: { $0.rect.topLeftCorner == corner }) { return match }
+    if let id = wsDump.monitorId, sortedMonitors.indices.contains(id - 1) { return sortedMonitors[id - 1] }
+    return nil
 }
 
 /// Binds the node described by `dump` under `parent`. Returns the bound node,
