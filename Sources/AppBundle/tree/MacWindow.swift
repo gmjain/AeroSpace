@@ -30,9 +30,17 @@ final class MacWindow: Window {
         )
 
         // atomic synchronous section
-        if let existing = allWindowsMap[windowId] { return existing }
+        if let existing = allWindowsMap[windowId] {
+            dropAutoSplitWrapperIfRedundant(data.autoSplitWrapper) // [FORK gmjain/AeroSpace]
+            return existing
+        }
         let window = MacWindow(windowId, macApp, lastFloatingSize: rect?.size, parent: data.parent, adaptiveWeight: data.adaptiveWeight, index: data.index)
         allWindowsMap[windowId] = window
+        // [FORK gmjain/AeroSpace] auto-split-by-aspect wrapped the MRU window to receive this
+        // window. If the window does not stay there (on-window-detected moved or floated it, the
+        // closed-windows cache restored it elsewhere), the wrapper would linger as a redundant
+        // single-child container — forever with enable-normalization-flatten-containers = false.
+        defer { dropAutoSplitWrapperIfRedundant(data.autoSplitWrapper) }
 
         try await debugWindowsIfRecording(window, .cancellable)
         if try await !restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: window) {
@@ -226,6 +234,59 @@ private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, w
     window?.unbindFromParent() // It's important to unbind to get correct data from below
     let mruWindow = workspace.mostRecentWindowRecursive
     if let mruWindow, let tilingParent = mruWindow.parent as? TilingContainer {
+        // [FORK gmjain/AeroSpace] auto-split-by-aspect: split the MRU window
+        // along its long edge instead of inserting into its parent as-is.
+        if config.autoSplitByAspect, tilingParent.layout == .tiles,
+           let rect = mruWindow.lastAppliedLayoutPhysicalRect
+        {
+            let desired: Orientation = rect.width >= rect.height ? .h : .v
+            if desired != tilingParent.orientation {
+                let isLone = tilingParent.children.count == 1
+                // changeOrientation cascades to every ancestor container when
+                // enable-normalization-opposite-orientation-for-nested-containers is on, so a lone
+                // NESTED container (possible mid-refresh: dead windows are GC'd before new ones are
+                // registered, normalization runs later) is never flipped.
+                if isLone,
+                   tilingParent.isRootContainer || !config.enableNormalizationOppositeOrientationForNestedContainers
+                {
+                    // MRU window is alone: just flip its container.
+                    tilingParent.changeOrientation(desired)
+                } else if isLone, let grandparent = tilingParent.parent as? TilingContainer,
+                          grandparent.orientation == desired, grandparent.layout == .tiles
+                {
+                    // Lone nested container under opposite-orientation normalization: its parent
+                    // already splits the desired way, so the new window goes next to it there. A
+                    // wrapper would have the grandparent's orientation; flatten normalization lifts
+                    // it into the grandparent, then opposite-orientation normalization flips it.
+                    // An accordion grandparent or not-yet-normalized orientations fall through to the wrap.
+                    return BindingData(
+                        parent: grandparent,
+                        adaptiveWeight: WEIGHT_AUTO,
+                        index: tilingParent.ownIndex.orDie() + 1,
+                    )
+                } else {
+                    // Wrap the MRU window in a container of the desired
+                    // orientation and insert the new window next to it there
+                    // (same mechanics as join-with).
+                    let prevBinding = mruWindow.unbindFromParent()
+                    let newParent = TilingContainer(
+                        parent: tilingParent,
+                        adaptiveWeight: prevBinding.adaptiveWeight,
+                        desired,
+                        .tiles,
+                        index: prevBinding.index,
+                    )
+                    newParent.isAutoSplitWrapper = true
+                    mruWindow.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
+                    return BindingData(
+                        parent: newParent,
+                        adaptiveWeight: WEIGHT_AUTO,
+                        index: INDEX_BIND_LAST,
+                        autoSplitWrapper: newParent,
+                    )
+                }
+            }
+        }
         return BindingData(
             parent: tilingParent,
             adaptiveWeight: WEIGHT_AUTO,
@@ -237,6 +298,64 @@ private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, w
             adaptiveWeight: WEIGHT_AUTO,
             index: INDEX_BIND_LAST,
         )
+    }
+}
+
+// [FORK gmjain/AeroSpace] auto-split-by-aspect: `wrapper` was created to hold the MRU window plus
+// one new window. If it is left with a single child, hand that child the wrapper's own binding
+// (weight + index in the grandparent) and drop the wrapper. MRU bookkeeping mirrors
+// unbindEmptyAndAutoFlatten. Safe on any tree state: only bound nodes are unbound. Internal for tests.
+@MainActor
+func dropAutoSplitWrapperIfRedundant(_ wrapper: TilingContainer?) {
+    // The grandparent must be a TilingContainer: binding a window straight under a Workspace dies.
+    guard let wrapper, let grandparent = wrapper.parent as? TilingContainer, let child = wrapper.children.singleOrNil() else { return }
+    let mru = grandparent.mostRecentChild
+    child.unbindFromParent()
+    let binding = wrapper.unbindFromParent()
+    child.bind(to: binding.parent, adaptiveWeight: binding.adaptiveWeight, index: binding.index)
+    if mru != wrapper {
+        mru?.markAsMostRecentChild()
+    } else {
+        child.markAsMostRecentChild()
+    }
+}
+
+// [FORK gmjain/AeroSpace] auto-split-by-aspect, normalization step (R-2026-10-04-03). With
+// enable-normalization-flatten-containers = false nothing removes a wrapper that a later close left with one
+// child, and the next split of that window nests a new wrapper inside it: one level per episode (live: Telegram
+// under 12). Run from Workspace.normalizeContainers when flatten normalization is off, bottom-up, and flattens:
+// - a single-child auto-split wrapper (isAutoSplitWrapper): the fork made it, upstream would never have;
+// - with auto-split-by-aspect on, any container whose only child is a container. Upstream can make those too
+//   (split / join-with leftovers), but they change no layout, and they are how wrappers built before the tag
+//   existed (or loaded from an older dump) look. Single-child containers holding a window are kept unless
+//   tagged: that is what `split` makes on purpose.
+// Users with flatten normalization on, or with auto-split-by-aspect off and no wrappers, see no change.
+// MRU bookkeeping mirrors unbindEmptyAndAutoFlatten. Internal for tests.
+@MainActor
+func flattenRedundantAutoSplitWrappers(_ container: TilingContainer) {
+    for case let child as TilingContainer in container.children {
+        flattenRedundantAutoSplitWrappers(child)
+    }
+    guard let only = container.children.singleOrNil(),
+          container.isAutoSplitWrapper || (config.autoSplitByAspect && only is TilingContainer) else { return }
+    if let grandparent = container.parent as? TilingContainer {
+        // Opposite-orientation normalization runs right after this step: a container lifted into a parent of its
+        // own orientation would be flipped (its windows re-split the other way). Keep that level: layout-neutral.
+        if config.enableNormalizationOppositeOrientationForNestedContainers,
+           (only as? TilingContainer)?.orientation == grandparent.orientation { return }
+        dropAutoSplitWrapperIfRedundant(container)
+    } else if let only = only as? TilingContainer, let workspace = container.parent as? Workspace {
+        // Root container: its only child container becomes the root. A lone window stays (a Workspace may only
+        // hold containers).
+        let mru = workspace.mostRecentChild
+        only.unbindFromParent()
+        let binding = container.unbindFromParent()
+        only.bind(to: binding.parent, adaptiveWeight: binding.adaptiveWeight, index: binding.index)
+        if mru != container {
+            mru?.markAsMostRecentChild()
+        } else {
+            only.markAsMostRecentChild()
+        }
     }
 }
 

@@ -95,6 +95,7 @@ private func restoreTreeRecursive(frozenContainer: FrozenContainer, parent: NonL
         frozenContainer.layout,
         index: index,
     )
+    container.isAutoSplitWrapper = frozenContainer.isAutoSplitWrapper // [FORK gmjain/AeroSpace]
 
     for (index, child) in frozenContainer.children.enumerated() {
         switch child {
