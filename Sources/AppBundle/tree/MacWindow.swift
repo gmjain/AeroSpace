@@ -282,15 +282,29 @@ func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: W
            let rect = mruWindow.lastAppliedLayoutPhysicalRect {
             let desired: Orientation = rect.width >= rect.height ? .h : .v
             if desired != tilingParent.orientation {
+                let isLone = tilingParent.children.count == 1
                 // changeOrientation cascades to every ancestor container when
                 // enable-normalization-opposite-orientation-for-nested-containers is on, so a lone
                 // NESTED container (possible mid-refresh: dead windows are GC'd before new ones are
-                // registered, normalization runs later) is wrapped like any other, not flipped.
-                if tilingParent.children.count == 1,
+                // registered, normalization runs later) is never flipped.
+                if isLone,
                    tilingParent.isRootContainer || !config.enableNormalizationOppositeOrientationForNestedContainers
                 {
                     // MRU window is alone: just flip its container.
                     tilingParent.changeOrientation(desired)
+                } else if isLone, let grandparent = tilingParent.parent as? TilingContainer,
+                          grandparent.orientation == desired, grandparent.layout == .tiles
+                {
+                    // Lone nested container under opposite-orientation normalization: its parent
+                    // already splits the desired way, so the new window goes next to it there. A
+                    // wrapper would have the grandparent's orientation; flatten normalization lifts
+                    // it into the grandparent, then opposite-orientation normalization flips it.
+                    // An accordion grandparent or not-yet-normalized orientations fall through to the wrap.
+                    return BindingData(
+                        parent: grandparent,
+                        adaptiveWeight: WEIGHT_AUTO,
+                        index: tilingParent.ownIndex.orDie() + 1,
+                    )
                 } else {
                     // Wrap the MRU window in a container of the desired
                     // orientation and insert the new window next to it there
