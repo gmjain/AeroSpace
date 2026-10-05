@@ -373,6 +373,28 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(pendingOwnFocus, nil)
     }
 
+    /// alt-enter places a WezTerm window and arms the guard; the user types cmd-n into it (no token, no
+    /// hotkey) and a new WezTerm window opens. That window did not exist when the guard was armed, so it
+    /// can't be the activation steal the guard is for: not rejected, and its acceptance ends the guard.
+    func testSpawnFocusGuardIgnoresWindowsRegisteredAfterArming() {
+        let (visible, _) = arrange()
+        let placed = TestWindow.new(id: 6, parent: focus.workspace.rootTilingContainer)
+        _ = placed.focusWindow()
+        updateFocusCache(placed)
+        armSpawnFocusGuard(placed.windowId)
+        let opened = TestWindow.new(id: 10, parent: focus.workspace.rootTilingContainer) // cmd-n
+        TestApp.shared.focusedWindow = opened
+        updateFocusCache(opened)
+        assertEquals(focus.windowOrNil, opened)
+        assertEquals(TestApp.shared.focusedWindow, opened) // not pushed back to the placed window
+        assertEquals(spawnFocusGuardWindowId, nil)
+        // A window that existed when the guard was armed is still a steal (re-armed: the accept released it).
+        armSpawnFocusGuard(opened.windowId)
+        updateFocusCache(visible)
+        assertEquals(focus.windowOrNil, opened)
+        assertEquals(TestApp.shared.focusedWindow, opened)
+    }
+
     func testParseFocusGrantChords() {
         let result = parseConfig(
             """

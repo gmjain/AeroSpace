@@ -95,11 +95,16 @@ struct SpawnIntent: Sendable, Equatable {
 // window does not end it (2026-10-04): when macOS keyed the new window before
 // AeroSpace saw it, placement and confirmation happen in the same refresh
 // session, and the late same-app re-key of the anchor window the guard exists
-// for came after it.
+// for came after it. Only windows registered before the guard was armed can be
+// a steal: a new window (cmd-n in the placed window) is not judged by it.
 
 private struct FocusGuard {
     let windowId: UInt32
     var refires: Int
+    /// Every window AeroSpace knew when the guard was armed. A steal re-keys one of these (an older
+    /// instance's window); a window registered later is a new one the user opened without a click or
+    /// hotkey (cmd-n typed into the placed WezTerm window), never this guard's business.
+    let knownWindowIds: Set<UInt32>
 }
 
 let maxSpawnFocusGuardRefires = 3
@@ -110,7 +115,14 @@ let maxSpawnFocusGuardRefires = 3
 @MainActor var spawnFocusGuardWindowId: UInt32? { _focusGuard?.windowId }
 
 @MainActor func armSpawnFocusGuard(_ windowId: UInt32) {
-    _focusGuard = FocusGuard(windowId: windowId, refires: 0)
+    _focusGuard = FocusGuard(windowId: windowId, refires: 0, knownWindowIds: registeredWindowIds())
+}
+
+/// All windows AeroSpace has registered (unit tests: the test windows in the tree).
+@MainActor private func registeredWindowIds() -> Set<UInt32> {
+    isUnitTest
+        ? Set(Workspace.all.flatMap { $0.allLeafWindowsRecursive }.map(\.windowId))
+        : Set(MacWindow.allWindowsMap.keys)
 }
 
 @MainActor func clearSpawnFocusGuard() {
@@ -148,6 +160,10 @@ let maxSpawnFocusGuardRefires = 3
     // Another app: not this guard's call. The general rules judge it, and the guard is released only
     // if they accept it (releaseSpawnFocusGuard(acceptedFocusChangeTo:)), not when rule 6 rejects it.
     guard nativeFocused.app.rawAppBundleId == guarded.app.rawAppBundleId else { return false }
+    // A window opened after the guard was armed (cmd-n in the placed window) can't be the late
+    // activation of an older window the guard is for: the general rules judge it, and accepting it
+    // releases the guard. Rejecting it pushed the user back once per new window (wave-1 regression).
+    guard guard_.knownWindowIds.contains(nativeFocused.windowId) else { return false }
     if guard_.refires >= maxSpawnFocusGuardRefires {
         _focusGuard = nil // give up: the app keeps winning, let the general rules judge it
         return false
