@@ -128,13 +128,18 @@ extension MonitorInfo {
 
     @MainActor
     func setActiveWorkspace(_ workspace: Workspace) -> Bool {
-        // [FORK gmjain/AeroSpace]
-        if activeWorkspace != workspace {
+        // [FORK gmjain/AeroSpace] fork-debug-log: trace every monitor active-workspace change. With
+        // logging off this is upstream's one-liner. The cache is read directly: the activeWorkspace
+        // getter rearranges monitors on a cache miss, a side effect this setter must not gain.
+        guard config.forkDebugLog else { return rect.topLeftCorner.setActiveWorkspace(workspace) }
+        let before = screenPointToVisibleWorkspace[rect.topLeftCorner]
+        let assigned = rect.topLeftCorner.setActiveWorkspace(workspace)
+        if assigned, before != workspace {
             forkDebugLog("setActiveWorkspace: monitor \(monitorId_oneBased?.description ?? "?") "
-                + "\(activeWorkspace.name) -> \(workspace.name) "
+                + "\(before?.name ?? "nil") -> \(workspace.name) "
                 + "(session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
         }
-        return rect.topLeftCorner.setActiveWorkspace(workspace)
+        return assigned
     }
 }
 
