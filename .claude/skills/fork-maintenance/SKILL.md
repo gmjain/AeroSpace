@@ -16,6 +16,12 @@ description: Entry point for maintaining the gmjain/AeroSpace hard fork end to e
 - Verify gates cheaply yourself (tree equality, test counts, `git log`, one grep of evidence) —
   never redo an agent's work. Small review findings: fix forward; big ones: send back.
 - Every worker prompt begins with the Worker contract below.
+- Worktree agents may start on a stale commit: every prompt says "create branch X from `main`
+  (<sha>) explicitly". Agents cannot write the main checkout (sandbox blocks `git -C` there), so
+  YOU fast-forward `main` after checking the gate (clean, on main, ancestor, backup tag exists).
+- Keep a running notes file in your scratchpad (user decisions, per-branch review flags, exact doc
+  deltas) and hand its path to the integrator instead of pasting it.
+- Custom `fork-*` agent types load only at session start; fall back to general-purpose + model.
 
 ## Worker contract (paste verbatim at the top of every worker prompt)
 ```
