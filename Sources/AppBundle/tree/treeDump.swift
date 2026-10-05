@@ -158,6 +158,11 @@ extension WorkspaceDump {
     // a later workspace was about to take, flipping single-child roots and
     // leaving wrapper containers behind.
     var orphans: [(window: Window, workspace: Workspace)] = []
+    // Child -> parent links are weak: a detached old root nothing holds is freed at the end of its
+    // loop iteration, its unclaimed windows are left with `parent == nil`, and the leftover pass's
+    // relayoutWindow -> unbindFromParent() dies "already unbound". Keep the old roots alive until
+    // that pass is done (closedWindowsCache.swift keeps its `prevRoot` alive for the same reason).
+    var prevRoots: [TilingContainer] = []
     for wsDump in dump.workspaces {
         let workspace = Workspace.get(byName: wsDump.name)
         if let rootDump = wsDump.root {
@@ -166,6 +171,7 @@ extension WorkspaceDump {
             guard rootDump.type == "container" else { continue }
             let prevRoot = workspace.rootTilingContainer
             orphans += prevRoot.allLeafWindowsRecursive.map { ($0, workspace) }
+            prevRoots.append(prevRoot)
             prevRoot.unbindFromParent()
             buildNode(rootDump, parent: workspace)
         }
@@ -187,9 +193,12 @@ extension WorkspaceDump {
             if cur !== target { window.bind(to: target, adaptiveWeight: WEIGHT_DOESNT_MATTER, index: INDEX_BIND_LAST) }
         }
     }
-    for (window, workspace) in orphans where !window.isBound {
+    // Unclaimed windows are still bound inside their detached old root, so `isBound` can't single
+    // them out; "on no workspace" can. Evaluated per iteration, after any earlier re-tile.
+    for (window, workspace) in orphans where window.nodeWorkspace == nil {
         try? await window.relayoutWindow(on: workspace, .nonCancellable, forceTile: true)
     }
+    prevRoots.removeAll()
 
     // 3) Visible workspaces (focused last), then the focused window.
     let visible = dump.workspaces.filter { $0.visible && !$0.focused } + dump.workspaces.filter(\.focused)
