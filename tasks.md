@@ -30,17 +30,18 @@ keep history linear.
 ## Active tasks
 
 ### 1. Stop special-casing apps for focus stealing (SUPERSEDED by the event-order model)
-Status: built 2026-09-12 on branch `event-order-guard`; deploy with the next release build, then
-awaiting a week of logs.
+Status: built 2026-09-12 on branch `event-order-guard`; on `main`; deployed status: verify with
+`aerospace --version` (pre-rebase fork.14 = 850dfa1c contained it). Log validation is meaningless
+until the rule-5 liveness-probe bug (docs/fork/REVIEW.md) is fixed.
 `focus-steal-guard-apps` used to be the only defense; the "user-intent clock" (accept hidden-ws
-focus within ~1 s of a deliberate action) and the parked 2 s proposal diff were clock-based and are
-dropped. What landed instead (FORK.md §6): `pendingOwnFocus` (our own unanswered focus request) +
+focus within ~1 s of a deliberate action) and the 2 s proposal (its diff was deleted in 1c7d830f;
+`git show 9675dd09`) were clock-based and are dropped. What landed instead (FORK.md §6): `pendingOwnFocus` (our own unanswered focus request) +
 `userInputToken` (mouse-down / release of a `focus-grant-chords` chord, spent by the first observed
 effect), six ordered rules in `updateFocusCache`, no clock anywhere; the app list is now the
 *strict* list. The decision gate from the old plan is answered (session events don't discriminate).
 - Validate: `grep 'hidden-ws' ~/.local/state/aerospace/fork-debug.log` after a week — every
   `ACCEPTED … [user-input:…]` must be a real cmd-tab/click/launch, every `REJECTED … [no-input…]`
-  a machine one. Watch for `token=none(spent-by:accept:…)` on a rejected cmd-tab (limitation 2).
+  a machine one. Watch for `token=none(spent-by:accept:…)` on a rejected cmd-tab (limitations 3 and 4 in FORK.md §6).
 - Then: remove Chrome/Claude/WezTerm from `focus-steal-guard-apps` one at a time; drop the key.
 - Not done here: making spawn-intent global (drop `spawn-intent-apps`) — separate change.
 - Acceptance unchanged: cmd-tab/Dock-click/Spotlight to hidden-workspace apps switch workspaces;
@@ -52,7 +53,9 @@ false (or remove the key) in aerospace.toml. Keep the feature in the fork — it
 found the last bug in seconds.
 
 ### 3. Upstream PR: FFM no-re-raise guard
-One-line patch (`focusFollowsMouse.swift`), references upstream discussion #2177. Surface the
+Submit only the minimal one-line commit (1e1897a4; the file's full fork diff is ~120 lines of
+hardening: isNativeFocused, ffmLastRaise, AXFullScreen reads, phase timing), referencing upstream
+discussion #2177. Surface the
 open design question in the PR: internal-focus vs native-focus desync (upstream may prefer
 `window != focus.windowOrNil || nativeFocusedWindow != window` semantics). If it lands, drop the
 commit from the patch queue on the next rebase.
@@ -92,5 +95,7 @@ browser/Finder back-forward); 4-finger = Spaces. Plan when picked up:
 
 ## Done (see FORK.md for detail)
 FFM no-re-raise · dump-tree/load-tree · restart (+ relauncher race fix) · auto-split-by-aspect ·
-spawn-intent + focus guard · focus-steal-guard-apps · fork-debug-log · daemon retired ·
-vanilla/ escape hatch · aerospace-state native-path integration.
+spawn-intent + focus guard · event-order focus guard (FORK.md §6; supersedes the app-list-only
+guard, `focus-steal-guard-apps` is now the strict list and is slated for removal, task 1) ·
+FFM native-fullscreen guard (§9) · fork-debug-log · daemon retired · vanilla/ escape hatch ·
+aerospace-state native-path integration. Past-session history: docs/fork/HISTORY.md.

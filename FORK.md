@@ -13,7 +13,7 @@ Owner: Gaurav Jain. This file is the canonical record of what diverges and why.
   spawn-intent and treeDump. Pre-rebase queue kept as tag `backup/main-pre-rebase-2026-10-04`.
 - `main` — **the deployable patch queue**. Linear history: upstream base + fork commits, rebase
   mechanics (no merge commits). Currently based on upstream `main` @ 74a1bf17 (untagged).
-- Features are developed on branches (`tree-dump-load`, `auto-split`, `spawn-intent`, ...),
+- Features are developed on short-lived per-feature branches (e.g. `spawn-intent`, `auto-split`),
   verified, then ff-merged into `main`. **Always deploy `main`.**
 - Upstream update procedure: fetch into `upstream`, rebase `main`'s fork commits onto the new
   base, decide per-commit whether to keep or drop (features may have landed upstream).
@@ -23,11 +23,17 @@ same way in `~/git/config/aerospace/aerospace.toml`.
 
 ## Fork features (in main, chronological)
 
+(Numbering skips §8: it was the user-intent clock, rolled back and parked; see
+[docs/fork/HISTORY.md](docs/fork/HISTORY.md).)
+
 ### 1. focus-follows-mouse: no re-raise of the focused window
-`Sources/AppBundle/mouse/focusFollowsMouse.swift` — one-line guard (`window != focus.windowOrNil`).
+`Sources/AppBundle/mouse/focusFollowsMouse.swift` — started as a one-line guard
+(`window != focus.windowOrNil`, commit 1e1897a4); the file's current fork diff is ~120 lines (see
+the review/lag notes below and §9).
 Upstream FFM re-raises the window under the mouse on every move; the AX raise dismisses the app's
 own popup windows (Chrome extension dropdowns, menubar-app panels). Related: upstream discussion
-#2177. **Best upstream-PR candidate.**
+#2177. **Best upstream-PR candidate**: submit only the minimal one-line commit (1e1897a4), not the
+later hardening.
 2026-09-05 review fixes: the skip now requires macOS to agree (`isNativeFocused(window)`, fed by
 `updateFocusCache`'s last-seen native window). Before, a desktop/gap click (Finder) or a Dock click
 on an app with only minimized windows left AeroSpace's focus on X while macOS was elsewhere, and
@@ -119,8 +125,9 @@ had one too until 2026-09-12).
 
 ### 6. Event-order focus guard (config: focus-steal-guard-apps, focus-grant-chords)
 `Sources/AppBundle/focusCache.swift: updateFocusCache` + `Sources/AppBundle/userInput.swift`
-(built 2026-09-12 on branch `event-order-guard`, goes out with the next release build; supersedes
-the app-list-only guard below).
+(built 2026-09-12 on branch `event-order-guard`, now on `main`; deployed status: verify with
+`aerospace --version`. The pre-rebase build fork.14 = 850dfa1c contained it; supersedes the
+app-list-only guard below).
 
 **Problem.** macOS reports a native focus change onto a window on a *hidden* workspace both for
 things the user did (cmd-tab, Dock click, Spotlight/Raycast launch, a link clicked in another app, a
@@ -133,8 +140,8 @@ hidden-ws focus only for apps in `focus-steal-guard-apps`, which is app special-
 accepted every unlisted app (regression cases below).
 
 **Model.** The decision is made by *event order*, never by elapsed time: no `Date`/clock comparison
-anywhere in it (the 2 s variants — the spawn guard expiry and the parked
-the dropped timing-based proposal — were the failed timing-based attempts; see History). Two facts:
+anywhere in it (the 2 s spawn-guard expiry and the dropped timing-based proposal were the
+failed timing-based attempts; see History below and docs/fork/HISTORY.md). Two facts:
 - `pendingOwnFocus` — the window AeroSpace last asked macOS to focus and has not yet seen reported
   back. `MacWindow.nativeFocus()` is the single choke point (light sessions' `focusAfter`, FFM,
   spawn-intent placement, the guard push-backs, `garbageCollect`'s dead-window focus). Cleared by
@@ -221,8 +228,8 @@ off-screen. 2026-09-05 review data on session-event discrimination: WezTerm stea
 "reject only .ax sessions" would accept the steal; Chrome rejections (955) were 80% one window
 re-rejected every session (fix (a)). The dropped timing-based proposal (cross-app
 activation + no hotkey in the last 2 s) and the "user-intent clock" idea (accept within ~1 s of a
-deliberate action) were both clock-based and are superseded by this model; the diff is kept only as
-a record of what not to do.
+deliberate action) were both clock-based and are superseded by this model. The proposal diff was
+deleted in 1c7d830f; `git show 9675dd09` still shows it.
 
 ### 7. fork-debug-log (config)
 `Sources/AppBundle/forkDebugLog.swift`. Opt-in tracing to
@@ -325,6 +332,7 @@ Gotchas (all learned in production):
   event-order guard (§6) judging Chrome/Claude/WezTerm correctly; then drop the key. `spawn-intent-apps`
   is the remaining app list: spawn-intent could anchor every new tiling window to the last hotkey's
   focus context (typing and FFM hovers don't move the anchor) — separate change, not started.
-- Upstream PR for #1 (FFM re-raise guard), referencing discussion #2177.
+- Upstream PR for #1 (FFM re-raise guard; the minimal one-line commit 1e1897a4 only),
+  referencing discussion #2177.
 - Possibly upstream dump-tree/load-tree (#2173 and #57 are circling layout persistence).
 - Disable fork-debug-log once the alt-l/ws4 steal is confirmed dead in daily use.
