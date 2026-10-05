@@ -2,12 +2,37 @@ import AppKit
 
 @MainActor private var focusFollowsMouseMonitor: Any? = nil
 @MainActor private var focusFollowsTask: Task<(), any Error>? = nil
-/// [FORK gmjain/AeroSpace] The last window FFM raised and what macOS was reporting as focused when
-/// it did. FFM raises again only when that observation changes (macOS confirmed something else, e.g.
+/// [FORK gmjain/AeroSpace] The last window FFM raised and the native-focus observation it was raised
+/// under. FFM raises again only when a new observation arrives (macOS confirmed something else, e.g.
 /// Finder after a desktop click), never merely because macOS has not answered yet: re-raising on
 /// every mouse move while a slow app (Chrome under load) was still processing the first make-main +
 /// raise queued dozens of AX actions on its UI thread and made it slower still (2026-09-12).
-@MainActor private var ffmLastRaise: (windowId: UInt32, observation: UInt32?)? = nil
+@MainActor private var ffmLastRaise: FfmRaise? = nil
+
+/// [FORK gmjain/AeroSpace] `observation` is nativeFocusObservationSeq, not the observed window id:
+/// the id can return to an old value (A focused, desktop click, A confirmed, desktop click again),
+/// and matching on it skipped the raise that should restore A, leaving keystrokes on Finder.
+struct FfmRaise: Equatable {
+    let windowId: UInt32
+    let observation: UInt64
+}
+
+/// [FORK gmjain/AeroSpace] Whether FFM raises the window under the cursor. Always on an AeroSpace
+/// focus transition. Otherwise only when macOS disagrees (`nativeFocused` false: a desktop/gap click
+/// or a Dock click moved native focus away without AeroSpace adopting it) and this window has not
+/// already been raised under the current observation. Skipping when both agree keeps the app's own
+/// popups alive (the raise dismisses Chrome extension dropdowns; popups never update the cache).
+func ffmShouldRaise(
+    windowId: UInt32,
+    transition: Bool,
+    nativeFocused: Bool,
+    observation: UInt64,
+    lastRaise: FfmRaise?,
+) -> Bool {
+    if transition { return true }
+    if nativeFocused { return false }
+    return lastRaise != FfmRaise(windowId: windowId, observation: observation)
+}
 
 @MainActor func syncFocusFollowsMouse(_ config: Config) {
     if config.focusFollowsMouse.enabled == (focusFollowsMouseMonitor != nil) {
@@ -86,18 +111,17 @@ import AppKit
             if window == nil {
                 window = location.findWindowRecursively(in: workspace.rootTilingContainer, virtual: false, fullscreenCoversAll: true)
             }
-            // [FORK gmjain/AeroSpace] Skip the re-raise only when AeroSpace AND macOS already agree that
-            // `window` is focused (the raise dismisses the app's own popups, e.g. Chrome extension
-            // dropdowns — popups never update the native focus cache, so this keeps them alive). When
-            // macOS moved focus elsewhere without AeroSpace adopting it (click on the desktop/gap ->
-            // Finder, Dock click on an app with only minimized windows) hovering must still restore it.
+            // [FORK gmjain/AeroSpace] Skip the re-raise when AeroSpace AND macOS already agree that
+            // `window` is focused, or when it was already raised under the current observation.
             if let window {
                 let transition = window != focus.windowOrNil
-                let macosDisagrees = !isNativeFocused(window)
-                let raisedForThisObservation = ffmLastRaise.map {
-                    $0.windowId == window.windowId && $0.observation == nativeFocusObservation
-                } ?? false
-                if transition || (macosDisagrees && !raisedForThisObservation) {
+                if ffmShouldRaise(
+                    windowId: window.windowId,
+                    transition: transition,
+                    nativeFocused: isNativeFocused(window),
+                    observation: nativeFocusObservationSeq,
+                    lastRaise: ffmLastRaise,
+                ) {
                     outcome = (transition ? "raise-transition" : "raise-disagree") + " -> \(forkDebugDescribe(window))"
                     let sessionStart = ContinuousClock.now
                     try await runLightSession(.focusFollowsMouse, token) {
@@ -106,7 +130,7 @@ import AppKit
                     }
                     tSession = ContinuousClock.now - sessionStart
                     // Recorded after the session: its updateFocusCache may have refreshed the observation.
-                    ffmLastRaise = (window.windowId, nativeFocusObservation)
+                    ffmLastRaise = FfmRaise(windowId: window.windowId, observation: nativeFocusObservationSeq)
                 }
             }
         }
