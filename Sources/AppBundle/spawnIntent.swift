@@ -96,7 +96,8 @@ struct SpawnIntent: Sendable, Equatable {
 // AeroSpace saw it, placement and confirmation happen in the same refresh
 // session, and the late same-app re-key of the anchor window the guard exists
 // for came after it. Only windows registered before the guard was armed can be
-// a steal: a new window (cmd-n in the placed window) is not judged by it.
+// a steal: a new window (cmd-n in the placed window) is not judged by it. A
+// minimized or hidden placed window releases it, like a closed one.
 
 private struct FocusGuard {
     let windowId: UInt32
@@ -136,6 +137,12 @@ let maxSpawnFocusGuardRefires = 3
     if let guard_ = _focusGuard, guard_.windowId != window.windowId { _focusGuard = nil }
 }
 
+@MainActor private func isPlacedWindowPutAway(_ window: Window) -> Bool {
+    window.parent is MacosMinimizedWindowsContainer || window.parent is MacosHiddenAppsWindowsContainer
+        || (window as? MacWindow)?.macApp.nsApp.isHidden == true
+        || !isWindowOnScreenInWindowServer(window.windowId)
+}
+
 /// Returns true if this native focus change is an activation steal that was
 /// rejected (macOS focus pushed back to the guarded window).
 @MainActor func rejectStolenNativeFocus(_ nativeFocused: Window?) -> Bool {
@@ -146,6 +153,14 @@ let maxSpawnFocusGuardRefires = 3
     // The placed window is gone. The window-server probe catches a close before garbageCollect has
     // run (updateFocusCache comes first in a session): never push back to a dead window.
     guard let guarded = Window.get(byId: guard_.windowId), isWindowAliveInWindowServer(guard_.windowId) else {
+        _focusGuard = nil
+        return false
+    }
+    // The placed window was minimized (cmd-m) or its app hidden (cmd-h): the user put it away, and macOS
+    // keying another window of the app is the consequence. Pushing back would un-minimize / un-hide it.
+    // Checked in the window server too: normalizeLayoutReason moves the window to the minimized/hidden
+    // container only later in the session that sees the re-key.
+    if isPlacedWindowPutAway(guarded) {
         _focusGuard = nil
         return false
     }

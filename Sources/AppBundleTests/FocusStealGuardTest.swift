@@ -197,10 +197,13 @@ final class FocusStealGuardTest: XCTestCase {
         }
         guard let live = ids(onScreen: true).first else { throw XCTSkip("no window server session / no windows") }
         assertEquals(windowServerHasWindow(live), true)
+        assertEquals(windowServerWindowIsOnScreen(live), true)
         if let offScreen = ids(onScreen: false).first {
             assertEquals(windowServerHasWindow(offScreen), true)
+            assertEquals(windowServerWindowIsOnScreen(offScreen), false)
         }
         assertEquals(windowServerHasWindow(4_000_000_000), false)
+        assertEquals(windowServerWindowIsOnScreen(4_000_000_000), nil)
     }
 
     func testPopupNeverJudged() {
@@ -393,6 +396,24 @@ final class FocusStealGuardTest: XCTestCase {
         updateFocusCache(visible)
         assertEquals(focus.windowOrNil, opened)
         assertEquals(TestApp.shared.focusedWindow, opened)
+    }
+
+    /// cmd-m on the just-placed window (or cmd-h on its app), then macOS keys another window of the same
+    /// app. The minimized window still exists, so the guard pushed back to it (un-minimizing it). A placed
+    /// window that is off-screen (minimized, hidden app) releases the guard; that is not checked through
+    /// the minimized container only, because normalizeLayoutReason moves it there later in the session.
+    func testSpawnFocusGuardReleasedWhenPlacedWindowMinimized() {
+        let (visible, _) = arrange()
+        let placed = TestWindow.new(id: 6, parent: focus.workspace.rootTilingContainer)
+        _ = placed.focusWindow()
+        updateFocusCache(placed)
+        armSpawnFocusGuard(placed.windowId)
+        windowOnScreenForTests = { $0 != placed.windowId } // cmd-m: alive, off-screen
+        TestApp.shared.focusedWindow = visible
+        updateFocusCache(visible) // macOS keys the app's other window
+        assertEquals(spawnFocusGuardWindowId, nil)
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(TestApp.shared.focusedWindow, visible) // not pushed back to the minimized window
     }
 
     func testParseFocusGrantChords() {

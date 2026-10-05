@@ -115,6 +115,7 @@ private let chordModifierMask: NSEvent.ModifierFlags = [.command, .control, .opt
     armedChord = nil
     pendingOwnFocus = nil
     windowLivenessForTests = nil
+    windowOnScreenForTests = nil
     clearSpawnFocusGuard()
 }
 
@@ -188,6 +189,8 @@ let maxOwnFocusReasserts = 3
 
 /// Tests only: stands in for the window server (nil = every window is alive).
 @MainActor var windowLivenessForTests: ((UInt32) -> Bool)? = nil
+/// Tests only: stands in for the window server's on-screen flag (nil = every window is on-screen).
+@MainActor var windowOnScreenForTests: ((UInt32) -> Bool)? = nil
 
 /// Whether the window server still knows `windowId`. Synchronous CoreGraphics query, no AX round
 /// trip. Used to notice that the previously focused window was just closed BEFORE garbageCollect
@@ -208,9 +211,30 @@ let maxOwnFocusReasserts = 3
     return windowServerHasWindow(windowId) ?? true
 }
 
+/// Whether the window server shows `windowId` on-screen: false for minimized windows, windows of hidden
+/// apps and windows on another Space (AeroSpace's hidden workspaces park windows on-screen, in a corner).
+/// Unknown (query failed, window gone) counts as on-screen. The spawn focus guard uses it to notice that
+/// the placed window was minimized or hidden before normalizeLayoutReason moved it out of the tree.
+@MainActor func isWindowOnScreenInWindowServer(_ windowId: UInt32) -> Bool {
+    if isUnitTest { return windowOnScreenForTests?(windowId) ?? true }
+    return windowServerWindowIsOnScreen(windowId) ?? true
+}
+
+/// The raw query behind isWindowOnScreenInWindowServer: nil if the query failed or the window is gone.
+/// Not stubbed in tests.
+func windowServerWindowIsOnScreen(_ windowId: UInt32) -> Bool? {
+    guard let entry = windowServerDescription(windowId)?.first else { return nil }
+    return entry[kCGWindowIsOnscreen as String] as? Bool ?? false // the key is omitted for off-screen windows
+}
+
 /// The raw window-server query behind isWindowAliveInWindowServer: true/false, nil if the query failed.
 /// Not stubbed in tests (a test can probe real windows with it).
 func windowServerHasWindow(_ windowId: UInt32) -> Bool? {
+    windowServerDescription(windowId).map { !$0.isEmpty }
+}
+
+/// The window server's description of `windowId`: empty if it has no such window, nil if the query failed.
+private func windowServerDescription(_ windowId: UInt32) -> [[String: Any]]? {
     // CGWindowListCreateDescriptionFromArray wants a CFArray whose values ARE the CGWindowIDs (no
     // callbacks, no boxing). Until 2026-10-04 an NSNumber-boxed array returned no entry for live windows,
     // so every window probed dead and rule 5 never fired; a bridged `[UInt32] as CFArray` fails the same
@@ -220,7 +244,7 @@ func windowServerHasWindow(_ windowId: UInt32) -> Bool? {
     guard let array = unsafe CFArrayCreate(nil, &value, 1, nil),
           let list = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]]
     else { return nil }
-    return !list.isEmpty
+    return list
 }
 
 // --------------------------------------------------------------- monitor
