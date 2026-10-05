@@ -96,7 +96,11 @@ import Common
         for prevId in [lastKnownNativeFocusedWindowId, focus.windowOrNil?.windowId].compactMap({ $0 })
             where prevId != window.windowId && Window.get(byId: prevId) != nil && !isWindowAliveInWindowServer(prevId)
         {
-            consumeUserInputToken(by: "close:\(forkDebugDescribe(Window.get(byId: prevId)))")
+            let closed = forkDebugDescribe(Window.get(byId: prevId))
+            forkDebugLog("updateFocusCache: liveness probe: previously focused \(closed) is gone from the window server "
+                + "(alive=false) -> token spent as close before judging \(forkDebugDescribe(window)) "
+                + "[\(userInputStateForLog)] (session: \(sessionTag))")
+            consumeUserInputToken(by: "close:\(closed)")
             break
         }
     }

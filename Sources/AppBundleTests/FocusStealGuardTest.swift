@@ -1,5 +1,6 @@
 @testable import AppBundle
 import Common
+import CoreGraphics
 import XCTest
 
 // [FORK gmjain/AeroSpace] event-order focus guard (updateFocusCache rules 1-6, userInput.swift)
@@ -141,6 +142,16 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(focus.windowOrNil, visible)
         assertEquals(userInputToken, false)
         assertTrue(lastUserInputSpentBy?.hasPrefix("close:") == true)
+    }
+
+    /// The real (unstubbed) window-server query: live windows must probe alive. Until 2026-10-04 it
+    /// reported every window dead, so every token was spent as `close:` and rule 5 never fired.
+    func testWindowServerLivenessProbeAgainstRealWindows() throws {
+        let onScreen = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
+            .compactMap { ($0[kCGWindowNumber as String] as? Int).map(UInt32.init) }
+        guard let live = onScreen.first else { throw XCTSkip("no window server session / no on-screen windows") }
+        assertEquals(windowServerHasWindow(live), true)
+        assertEquals(windowServerHasWindow(4_000_000_000), false)
     }
 
     func testPopupNeverJudged() {

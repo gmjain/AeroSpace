@@ -172,8 +172,18 @@ let maxOwnFocusReasserts = 3
 /// Unknown (query failed) counts as alive.
 @MainActor func isWindowAliveInWindowServer(_ windowId: UInt32) -> Bool {
     if isUnitTest { return windowLivenessForTests?(windowId) ?? true } // test window ids are not real windows
-    guard let list = CGWindowListCreateDescriptionFromArray([NSNumber(value: windowId)] as CFArray) as? [AnyObject] else {
-        return true
+    return windowServerHasWindow(windowId) ?? true
+}
+
+/// The raw window-server query behind isWindowAliveInWindowServer: true/false, nil if the query failed.
+/// Not stubbed in tests (a test can probe real on-screen windows with it).
+func windowServerHasWindow(_ windowId: UInt32) -> Bool? {
+    // CGWindowListCreateDescriptionFromArray wants a CFArray of raw CGWindowID values; the NSNumber-boxed
+    // array used until 2026-10-04 returned no entry for live windows, so every window probed dead and
+    // rule 5 never fired (every token was spent as `close:`). `.optionIncludingWindow` returns exactly the
+    // given window, on- or off-screen (AeroSpace parks hidden-workspace windows in a corner).
+    guard let list = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(windowId)) as? [[String: Any]] else {
+        return nil
     }
     return !list.isEmpty
 }
