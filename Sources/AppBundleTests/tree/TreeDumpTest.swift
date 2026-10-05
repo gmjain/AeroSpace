@@ -47,6 +47,20 @@ final class TreeDumpTest: XCTestCase {
         assertEquals(focus.windowOrNil?.windowId, 1) // focusedWindowId is checked against its entry too
     }
 
+    /// A window as the root is illegal (a Workspace holds only containers): ignore the root, keep the
+    /// current tree, and still restore the workspace's floating windows.
+    func testNonContainerRootStillRestoresFloating() async {
+        let ws = Workspace.get(byName: "a")
+        TestWindow.new(id: 1, parent: ws.rootTilingContainer)
+        TestWindow.new(id: 2, parent: focus.workspace.rootTilingContainer)
+        var wsDump = WorkspaceDump(name: ws.name)
+        wsDump.root = NodeDump(type: "window", id: 1)
+        wsDump.floating = [NodeDump(type: "window", id: 2)]
+        await loadTree(TreeDump(workspaces: [wsDump]))
+        assertEquals(ws.rootTilingContainer.allLeafWindowsRecursive.map(\.windowId), [1])
+        assertEquals(ws.floatingWindows.map(\.windowId), [2])
+    }
+
     func testDumpedMonitorMatching() {
         let laptop = FakeMonitor(name: "Built-in", x: 0)
         let dell = FakeMonitor(name: "DELL", x: 1920)
