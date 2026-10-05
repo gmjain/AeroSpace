@@ -300,7 +300,9 @@ func clearRestartState() {
 }
 
 /// Called once during startup, after initial window detection. If a restart
-/// state file was written moments ago (by the restart command), reload it.
+/// state file was written moments ago (by the restart command; its relauncher
+/// touches it right before relaunching, so a slow quit doesn't age it out),
+/// reload it.
 @MainActor func loadRestartStateIfFresh() async {
     let fm = FileManager.default
     guard let attrs = try? fm.attributesOfItem(atPath: restartStatePath),

@@ -66,7 +66,11 @@ struct RestartCommand: Command {
 ///    still alive is a no-op against the dying process, stranding the user with
 ///    no AeroSpace at all. Poll until it is gone; after 10 min give up loudly
 ///    into restart-failed.log instead of firing that no-op `open`.
-/// 2. Relaunch exactly this bundle with this instance's server args.
+/// 2. Touch the state file (if any): the new instance only loads it while it is
+///    fresh (loadRestartStateIfFresh), and the wait above can outlast that
+///    window when quitting blocks on slow AX calls. Freshness then counts from
+///    the relaunch, not from the dump.
+/// 3. Relaunch exactly this bundle with this instance's server args.
 ///    `open -a AeroSpace` let LaunchServices resolve the *name* to any registered
 ///    copy (it chose the xcode build-products bundle once, 2026-08-02), dropped
 ///    --config-path/--read-only, and debug builds aren't even named "AeroSpace".
@@ -90,6 +94,7 @@ private func relauncherScript(oldPid: pid_t) -> String {
             fi
             sleep 0.2
         done
+        if [ -e \(restartStatePath.shellQuoted) ]; then touch \(restartStatePath.shellQuoted); fi
         \(launch)
         """
 }
