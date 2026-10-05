@@ -56,23 +56,17 @@ func ffmShouldRaise(
             guard let token: RunSessionGuard = .isServerEnabled else { return }
             try checkCancellation()
             // [FORK gmjain/AeroSpace] phase timing for fork-debug-log (only hovers slower than 25 ms).
-            let t0 = ContinuousClock.now
-            var tAx: Duration = .zero, tRects: Duration = .zero, tSession: Duration = .zero
-            var outcome = "skip"
-            defer {
-                let total = ContinuousClock.now - t0
-                if config.forkDebugLog, total > .milliseconds(25) {
-                    forkDebugLog("ffm: \(outcome) total=\(total.ms)ms ax=\(tAx.ms)ms rects=\(tRects.ms)ms session=\(tSession.ms)ms")
-                }
-            }
+            // nil when logging is off: such a hover reads no clocks and builds no log strings.
+            let timing = config.forkDebugLog ? FfmHoverTiming() : nil
+            defer { timing?.logIfSlow() }
             // Ignores macOS menubar dropdown, but, unfortunately, it doesn't ignore non-native menu-like fake windows.
             // todo: It would be cool to somehow reuse isWindowHeuristic logic here
             // Windows AeroSpace already tiles/floats cannot be native fullscreen (those live in the
             // fullscreen container), so the AXFullScreen round trip is skipped for them.
             let ordinaryManaged = ordinaryManagedWindowIds()
-            let axStart = ContinuousClock.now
+            timing?.startPhase()
             let underMouse = await axWindowUnderMouse(location, ordinaryManaged: ordinaryManaged)
-            tAx = ContinuousClock.now - axStart
+            timing?.endPhase(\.ax)
             switch underMouse {
                 case nil: break // the AX query itself failed: unknown, proceed (upstream behavior)
                 case .notAWindow: return
@@ -97,7 +91,7 @@ func ffmShouldRaise(
             try checkCancellation()
             let workspace = location.monitorApproximation.activeWorkspace
             var window: Window? = nil
-            let rectsStart = ContinuousClock.now
+            timing?.startPhase() // [FORK gmjain/AeroSpace]
             for child in workspace.floatingWindowsContainer.mruChildren {
                 try checkCancellation()
                 guard let child = child as? Window else { continue }
@@ -107,7 +101,7 @@ func ffmShouldRaise(
                     break
                 }
             }
-            tRects = ContinuousClock.now - rectsStart
+            timing?.endPhase(\.rects) // [FORK gmjain/AeroSpace]
             if window == nil {
                 window = location.findWindowRecursively(in: workspace.rootTilingContainer, virtual: false, fullscreenCoversAll: true)
             }
@@ -122,17 +116,43 @@ func ffmShouldRaise(
                     observation: nativeFocusObservationSeq,
                     lastRaise: ffmLastRaise,
                 ) {
-                    outcome = (transition ? "raise-transition" : "raise-disagree") + " -> \(forkDebugDescribe(window))"
-                    let sessionStart = ContinuousClock.now
+                    if let timing {
+                        let kind = transition ? "raise-transition" : "raise-disagree"
+                        timing.outcome = "\(kind) -> \(forkDebugDescribe(window))"
+                    }
+                    timing?.startPhase()
                     try await runLightSession(.focusFollowsMouse, token) {
                         _ = window.focusWindow()
                         window.nativeFocus()
                     }
-                    tSession = ContinuousClock.now - sessionStart
+                    timing?.endPhase(\.session)
                     // Recorded after the session: its updateFocusCache may have refreshed the observation.
                     ffmLastRaise = FfmRaise(windowId: window.windowId, observation: nativeFocusObservationSeq)
                 }
             }
+        }
+    }
+}
+
+/// [FORK gmjain/AeroSpace] Per-hover phase timing for fork-debug-log. FFM creates one only while logging
+/// is on, so the hover hot path stays free of it otherwise.
+@MainActor private final class FfmHoverTiming {
+    private let start = ContinuousClock.now
+    private var phaseStart = ContinuousClock.now
+    var ax: Duration = .zero, rects: Duration = .zero, session: Duration = .zero
+    var outcome = "skip"
+
+    func startPhase() { phaseStart = .now }
+    func endPhase(_ phase: ReferenceWritableKeyPath<FfmHoverTiming, Duration>) {
+        self[keyPath: phase] = .now - phaseStart
+    }
+
+    /// Only hovers slower than 25 ms are logged.
+    func logIfSlow() {
+        let total = ContinuousClock.now - start
+        if total > .milliseconds(25) {
+            forkDebugLog("ffm: \(outcome) total=\(total.ms)ms ax=\(ax.ms)ms rects=\(rects.ms)ms "
+                + "session=\(session.ms)ms")
         }
     }
 }
