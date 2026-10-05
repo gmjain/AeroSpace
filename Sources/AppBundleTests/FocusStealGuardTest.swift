@@ -173,13 +173,31 @@ final class FocusStealGuardTest: XCTestCase {
         assertTrue(lastUserInputSpentBy?.hasPrefix("close:") == true)
     }
 
-    /// The real (unstubbed) window-server query: live windows must probe alive. Until 2026-10-04 it
-    /// reported every window dead, so every token was spent as `close:` and rule 5 never fired.
+    /// A window that still exists but is off-screen (minimized, hidden app, another Space) is not a close:
+    /// the token survives and the user's hidden-workspace focus change is accepted by rule 5.
+    func testOffScreenPreviouslyFocusedWindowDoesNotSpendToken() {
+        let (_, hidden) = arrange()
+        grantUserInputToken(.mouseDown(.leftMouseDown))
+        windowLivenessForTests = { _ in true } // what the window server says for a minimized window
+        updateFocusCache(hidden)
+        assertEquals(focus.windowOrNil, hidden) // rule 5
+        assertEquals(lastUserInputSpentBy?.hasPrefix("accept:"), true)
+    }
+
+    /// The real (unstubbed) window-server query: live windows probe alive, on- AND off-screen (minimized,
+    /// hidden-app and other-Space windows are alive). Until 2026-10-04 it reported every window dead, so
+    /// every token was spent as `close:` and rule 5 never fired.
     func testWindowServerLivenessProbeAgainstRealWindows() throws {
-        let onScreen = (CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? [])
-            .compactMap { ($0[kCGWindowNumber as String] as? Int).map(UInt32.init) }
-        guard let live = onScreen.first else { throw XCTSkip("no window server session / no on-screen windows") }
+        let all = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
+        func ids(onScreen: Bool) -> [UInt32] {
+            all.filter { ($0[kCGWindowIsOnscreen as String] as? Bool ?? false) == onScreen }
+                .compactMap { ($0[kCGWindowNumber as String] as? Int).map(UInt32.init) }
+        }
+        guard let live = ids(onScreen: true).first else { throw XCTSkip("no window server session / no windows") }
         assertEquals(windowServerHasWindow(live), true)
+        if let offScreen = ids(onScreen: false).first {
+            assertEquals(windowServerHasWindow(offScreen), true)
+        }
         assertEquals(windowServerHasWindow(4_000_000_000), false)
     }
 

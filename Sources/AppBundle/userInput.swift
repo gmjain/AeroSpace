@@ -192,21 +192,32 @@ let maxOwnFocusReasserts = 3
 /// runs (updateFocusCache is the first thing a refresh session does, garbage collection comes
 /// later): the app's re-key after a close must not ride the click that closed the window.
 /// Unknown (query failed) counts as alive.
+///
+/// "Gone" means destroyed. An off-screen window counts as alive, deliberately: minimized windows,
+/// windows of cmd-H-hidden apps and native-fullscreen windows on another Space are all off-screen
+/// and very much alive. Treating them as closed would spend the token and rule 6 would push macOS
+/// back to the minimized/hidden window (un-minimizing or un-hiding it) or reject a Dock click made
+/// from a fullscreen Space. AeroSpace's hidden workspaces park windows in a corner, still on-screen.
+/// Cost: a hide-on-close app (red button orders the window out instead of destroying it) is not
+/// seen as closed here; garbageCollect spends the token once AX drops the window, later in the
+/// session, so that app's immediate re-key of another hidden-workspace window can ride the click.
 @MainActor func isWindowAliveInWindowServer(_ windowId: UInt32) -> Bool {
     if isUnitTest { return windowLivenessForTests?(windowId) ?? true } // test window ids are not real windows
     return windowServerHasWindow(windowId) ?? true
 }
 
 /// The raw window-server query behind isWindowAliveInWindowServer: true/false, nil if the query failed.
-/// Not stubbed in tests (a test can probe real on-screen windows with it).
+/// Not stubbed in tests (a test can probe real windows with it).
 func windowServerHasWindow(_ windowId: UInt32) -> Bool? {
-    // CGWindowListCreateDescriptionFromArray wants a CFArray of raw CGWindowID values; the NSNumber-boxed
-    // array used until 2026-10-04 returned no entry for live windows, so every window probed dead and
-    // rule 5 never fired (every token was spent as `close:`). `.optionIncludingWindow` returns exactly the
-    // given window, on- or off-screen (AeroSpace parks hidden-workspace windows in a corner).
-    guard let list = CGWindowListCopyWindowInfo(.optionIncludingWindow, CGWindowID(windowId)) as? [[String: Any]] else {
-        return nil
-    }
+    // CGWindowListCreateDescriptionFromArray wants a CFArray whose values ARE the CGWindowIDs (no
+    // callbacks, no boxing). Until 2026-10-04 an NSNumber-boxed array returned no entry for live windows,
+    // so every window probed dead and rule 5 never fired; a bridged `[UInt32] as CFArray` fails the same
+    // way. `CGWindowListCopyWindowInfo(.optionIncludingWindow, id)` returns on-screen windows only (empty
+    // for minimized / hidden-app / other-Space windows), so it is not used either.
+    var value = unsafe UnsafeRawPointer(bitPattern: UInt(windowId))
+    guard let array = unsafe CFArrayCreate(nil, &value, 1, nil),
+          let list = CGWindowListCreateDescriptionFromArray(array) as? [[String: Any]]
+    else { return nil }
     return !list.isEmpty
 }
 
