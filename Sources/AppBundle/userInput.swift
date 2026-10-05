@@ -14,6 +14,9 @@ import HotKey
 //     report pointing at a hidden workspace is a stale/transient answer to our own request.
 //     Cleared when macOS reports that exact window or when physical input or a hotkey arrives (the
 //     user acted; what macOS reports next is theirs); replaced by a request for another window.
+//     Also superseded by input granted after the event that caused the request but before the
+//     request went out (cmd-tab released while the alt-1 session still awaits AX): see
+//     ownFocusCauseInputSeq.
 //     After `maxOwnFocusReasserts` re-asserts it stays as an exhausted marker: no more re-asserts
 //     and no more push-backs to that window (every push-back is itself a new own request, so
 //     clearing it let rule 3 / rule 6 ping-pong forever).
@@ -125,6 +128,9 @@ private let chordModifierMask: NSEvent.ModifierFlags = [.command, .control, .opt
 struct PendingOwnFocus: Equatable {
     let windowId: UInt32
     var reasserts: Int
+    /// userInputSeq as of the event that caused the request (see ownFocusCauseInputSeq). An unspent token
+    /// granted after it (userInputSeq greater) is input the request never accounted for: rule 3 yields.
+    let causeInputSeq: Int
     /// The re-assert budget is spent: updateFocusCache gave up on this request. Kept, not cleared, so
     /// rules 4/6 don't restart the cycle with a fresh push-back to the same window.
     var isExhausted: Bool { reasserts >= maxOwnFocusReasserts }
@@ -139,12 +145,21 @@ let maxOwnFocusReasserts = 3
 /// sync raise when the session body already asked macOS for the very window it would raise.
 @MainActor private(set) var ownFocusRequestSeq: Int = 0
 
+/// userInputSeq as of the event that started the current session (runLightSession scopes it; the heavy
+/// session it schedules inherits it). An own focus request is often issued after several awaits (the
+/// alt-1 session asks macOS for W1 only after layoutWorkspaces): a cmd-tab released in between cleared
+/// nothing (nothing was pending yet), so the request then looked newer than the cmd-tab and rule 3
+/// rejected the cmd-tab's activation and spent its token. Ordering requests by their cause, not by the
+/// moment they went out, lets that input win (FORK.md section 6, rule 3). nil: the request's own moment.
+@TaskLocal var ownFocusCauseInputSeq: Int? = nil
+
 /// Called from the single place where AeroSpace asks macOS to focus a window (Window.nativeFocus).
 /// Every request starts with a fresh re-assert budget, even for the same window (a new FFM raise or
 /// CLI `focus` is a new request); reassertPendingOwnFocus restores its own count afterwards.
 @MainActor func noteOwnFocusRequest(_ windowId: UInt32) {
     ownFocusRequestSeq += 1
-    pendingOwnFocus = PendingOwnFocus(windowId: windowId, reasserts: 0)
+    pendingOwnFocus = PendingOwnFocus(windowId: windowId, reasserts: 0,
+                                      causeInputSeq: ownFocusCauseInputSeq ?? userInputSeq)
 }
 
 /// macOS reported `windowId` as focused. Returns true if that confirms the pending own request.
@@ -156,6 +171,17 @@ let maxOwnFocusReasserts = 3
 
 @MainActor func clearPendingOwnFocus() {
     pendingOwnFocus = nil
+}
+
+/// Rule 3 yields to an unspent token granted after the cause of the pending own request: the user acted
+/// after the event AeroSpace was answering, so the report may be theirs (alt-1, then cmd-tab before the
+/// alt-1 session asked macOS for W1). Clears the request; rules 4-6 judge the report. Input granted before
+/// the cause never supersedes it: the request already answers it (a click, then FFM raising).
+/// Returns the cleared request, nil if it stands (or there is none).
+@MainActor func yieldPendingOwnFocusToLaterInput() -> PendingOwnFocus? {
+    guard let pending = pendingOwnFocus, userInputToken, userInputSeq > pending.causeInputSeq else { return nil }
+    pendingOwnFocus = nil
+    return pending
 }
 
 /// Asks macOS again for the pending window after rejecting a report of `stolen`. Returns the window
@@ -170,7 +196,8 @@ let maxOwnFocusReasserts = 3
         return nil
     }
     pushBackNativeFocus(from: stolen, to: window) // notes a fresh request for the window, which is this re-assert:
-    pendingOwnFocus = PendingOwnFocus(windowId: pending.windowId, reasserts: pending.reasserts + 1)
+    pendingOwnFocus = PendingOwnFocus(windowId: pending.windowId, reasserts: pending.reasserts + 1,
+                                      causeInputSeq: pending.causeInputSeq) // a re-assert keeps the original cause
     return window
 }
 

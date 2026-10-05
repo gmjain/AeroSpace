@@ -28,6 +28,11 @@ final class FocusStealGuardTest: XCTestCase {
         return (visible, hidden)
     }
 
+    /// An own request as noted outside any session: caused at the current userInputSeq.
+    private func ownRequest(_ window: Window, reasserts: Int) -> PendingOwnFocus {
+        PendingOwnFocus(windowId: window.windowId, reasserts: reasserts, causeInputSeq: userInputSeq)
+    }
+
     func testNoInputHiddenWsRejectedAndPushedBack() {
         let (visible, hidden) = arrange()
         TestApp.shared.focusedWindow = nil
@@ -36,7 +41,7 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(TestApp.shared.focusedWindow, visible) // pushed back
         assertTrue(Workspace.get(byName: "hidden").isVisible == false)
         // The push-back is an own focus request like any other (Window.nativeFocus is the choke point).
-        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: 0))
+        assertEquals(pendingOwnFocus, ownRequest(visible, reasserts: 0))
     }
 
     /// macOS keeps reporting the stolen window: one push-back, `maxOwnFocusReasserts` re-asserts, then
@@ -51,7 +56,7 @@ final class FocusStealGuardTest: XCTestCase {
         }
         assertEquals(ownFocusRequestSeq - seqBefore, 1 + maxOwnFocusReasserts)
         assertEquals(TestApp.shared.focusedWindow, hidden) // the last reports were rejected without a push-back
-        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: maxOwnFocusReasserts))
+        assertEquals(pendingOwnFocus, ownRequest(visible, reasserts: maxOwnFocusReasserts))
     }
 
     func testUserInputTokenAcceptsHiddenWsAndIsSpent() {
@@ -129,6 +134,43 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(lastUserInputSpentBy?.hasPrefix("reject:spawn-guard:"), true)
     }
 
+    /// alt-1 starts a light session; cmd-tab is released while it still awaits AX (nothing pending yet, so the
+    /// grant clears nothing); the session then asks macOS for W1; macOS reports cmd-tab's hidden-ws target.
+    /// Rule 3 used to reject it and spend the cmd-tab's token: the user had to cmd-tab again.
+    func testInputAfterOwnRequestCauseWinsOverRule3() {
+        let (visible, hidden) = arrange()
+        let alt1Seq = userInputSeq // what runLightSession scopes for the alt-1 session
+        grantUserInputToken(.chord("cmd-tab"))
+        $ownFocusCauseInputSeq.withValue(alt1Seq) {
+            noteOwnFocusRequest(visible.windowId) // the alt-1 session's syncFocusToMacOs, after its awaits
+        }
+        assertEquals(pendingOwnFocus?.causeInputSeq, alt1Seq)
+        let seqBefore = ownFocusRequestSeq
+        updateFocusCache(hidden) // rule 5, not rule 3
+        assertEquals(focus.windowOrNil, hidden)
+        assertTrue(Workspace.get(byName: "hidden").isVisible)
+        assertEquals(ownFocusRequestSeq, seqBefore) // no re-assert of W1
+        assertEquals(pendingOwnFocus, nil) // the superseded request is settled
+        assertEquals(userInputToken, false)
+        assertEquals(lastUserInputSpentBy?.hasPrefix("accept:"), true)
+    }
+
+    /// Input after the cause supersedes the request only while its token is unspent; a re-assert is the same
+    /// request and keeps the original cause. (A token granted before the cause never supersedes the request,
+    /// see testRejectionsSpendToken.)
+    func testSpentInputAfterCauseDoesNotSupersedeAndReassertKeepsCause() {
+        let (visible, hidden) = arrange()
+        let causeSeq = userInputSeq // alt-1's session starts
+        grantUserInputToken(.mouseDown(.leftMouseDown)) // a click during its awaits...
+        consumeUserInputToken(by: "test") // ...already spent (a rule 2 accept)
+        $ownFocusCauseInputSeq.withValue(causeSeq) { noteOwnFocusRequest(visible.windowId) }
+        updateFocusCache(hidden) // rule 3: the click is spent, nothing to justify the report
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(TestApp.shared.focusedWindow, visible) // re-asserted
+        assertEquals(pendingOwnFocus?.reasserts, 1)
+        assertEquals(pendingOwnFocus?.causeInputSeq, causeSeq) // not the re-assert's own moment
+    }
+
     func testStaleReportWhileOwnRequestPendingIsRejectedAndReasserted() {
         let (visible, hidden) = arrange()
         noteOwnFocusRequest(visible.windowId) // AeroSpace asked macOS for `visible`
@@ -136,7 +178,7 @@ final class FocusStealGuardTest: XCTestCase {
         updateFocusCache(hidden) // rule 3
         assertEquals(focus.windowOrNil, visible)
         assertEquals(TestApp.shared.focusedWindow, visible) // re-asserted
-        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: 1))
+        assertEquals(pendingOwnFocus, ownRequest(visible, reasserts: 1))
         // macOS answers with the window we asked for, even though it already was the last known
         // native focus: the request is confirmed and nothing is pending anymore.
         updateFocusCache(visible)
@@ -159,14 +201,14 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(focus.windowOrNil, visible)
         assertEquals(TestApp.shared.focusedWindow, hidden)
         assertEquals(ownFocusRequestSeq, seqBefore)
-        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: maxOwnFocusReasserts))
+        assertEquals(pendingOwnFocus, ownRequest(visible, reasserts: maxOwnFocusReasserts))
         // macOS finally reports the requested window: confirmed, the give-up marker is gone.
         TestApp.shared.focusedWindow = visible
         updateFocusCache(visible)
         assertEquals(pendingOwnFocus, nil)
         // A fresh request for the same window gets a fresh budget.
         noteOwnFocusRequest(visible.windowId)
-        assertEquals(pendingOwnFocus, PendingOwnFocus(windowId: visible.windowId, reasserts: 0))
+        assertEquals(pendingOwnFocus, ownRequest(visible, reasserts: 0))
     }
 
     func testOwnConfirmedAcceptsHiddenWs() {

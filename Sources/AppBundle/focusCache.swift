@@ -67,7 +67,8 @@ import Common // [FORK gmjain/AeroSpace]
 ///   2b. native-fullscreen: hidden workspace, but the window is macOS-native fullscreen on its own Space
 ///                         (reached by swipe / ctrl-arrow, which grant no token) -> accept; spend the token.
 ///   3. stale-own-pending: hidden workspace while our own request is still unanswered -> a stale or
-///                         transient report; reject and re-assert the request (bounded).
+///                         transient report; reject and re-assert the request (bounded). Skipped (request
+///                         cleared) when an unspent token was granted after the request's cause.
 ///   4. strict-app:        hidden workspace, app in focus-steal-guard-apps -> reject, push back.
 ///   5. user-input:<kind>: hidden workspace with an unspent input token -> accept, spend it.
 ///   6. no-input:          hidden workspace, nothing to justify it -> machine-caused; reject, push back.
@@ -101,7 +102,14 @@ import Common // [FORK gmjain/AeroSpace]
         consumeUserInputToken(by: "accept:\(forkDebugDescribe(window))")
         return true
     }
-    // 3. stale-own-pending
+    // 3. stale-own-pending. [FORK gmjain/AeroSpace] Unless an unspent token was granted after the event that
+    // caused the request (alt-1, cmd-tab released before the alt-1 session asked macOS for W1): the report
+    // is then the user's, rule 3 used to reject it and spend the token. Rules 4-6 judge it instead.
+    if let superseded = yieldPendingOwnFocusToLaterInput() {
+        forkDebugLog("updateFocusCache: own request for \(forkDebugDescribe(Window.get(byId: superseded.windowId))) "
+            + "superseded by later input (inputSeq \(userInputSeq) > cause \(superseded.causeInputSeq)) before judging "
+            + "\(forkDebugDescribe(window)) [\(userInputStateForLog)] (session: \(sessionTag))")
+    }
     if let reasserted = reassertPendingOwnFocus(stolen: window) {
         forkDebugLog("updateFocusCache: REJECTED hidden-ws focus by \(forkDebugDescribe(window)) "
             + "[stale-own-pending; re-assert \(pendingOwnFocus?.reasserts ?? 0)/\(maxOwnFocusReasserts) "
@@ -109,8 +117,9 @@ import Common // [FORK gmjain/AeroSpace]
         spendUserInputTokenOnRejection(of: window, reason: "stale-own-pending")
         return false
     }
-    // No pending request, its window is gone, or its re-assert budget is spent (given up): fall through
-    // to the input-based rules. An exhausted request stays set so they won't push back to it again.
+    // No pending request, its window is gone, later input superseded it, or its re-assert budget is spent
+    // (given up): fall through to the input-based rules. An exhausted request stays set so they won't push
+    // back to it again.
     // 4. strict-app
     if config.focusStealGuardApps.contains(window.app.rawAppBundleId ?? "") {
         return rejectOrAcceptHiddenWsSteal(window, reason: "strict-app")
