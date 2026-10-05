@@ -317,6 +317,28 @@ final class FocusStealGuardTest: XCTestCase {
         assertTrue(focusedWs.isVisible)
     }
 
+    /// R-2026-10-04-02: a native-fullscreen window lives on its own Space. A 4-finger swipe or ctrl-arrow
+    /// to it grants no token, and its AeroSpace workspace is usually hidden: rule 6 rejected it and the
+    /// push-back swapped the Space back. Strict apps were rejected even after a Mission Control click.
+    func testNativeFullscreenWindowOnHiddenWorkspaceIsAccepted() {
+        let (visible, _) = arrange()
+        let fsWs = Workspace.get(byName: "fs")
+        let fs = TestWindow.new(id: 9, parent: fsWs.macOsNativeFullscreenWindowsContainer)
+        TestApp.shared.focusedWindow = nil
+        updateFocusCache(fs) // swipe: no token
+        assertEquals(focus.windowOrNil, fs)
+        assertEquals(TestApp.shared.focusedWindow, nil) // not pushed back off the fullscreen Space
+
+        // Strict app, Mission Control click: accepted too, and the click's token is spent.
+        _ = visible.focusWindow()
+        updateFocusCache(visible)
+        config.focusStealGuardApps = [TestApp.shared.rawAppBundleId!]
+        grantUserInputToken(.mouseDown(.leftMouseDown))
+        updateFocusCache(fs)
+        assertEquals(focus.windowOrNil, fs)
+        assertEquals(userInputToken, false)
+    }
+
     func testParseFocusGrantChords() {
         let result = parseConfig(
             """

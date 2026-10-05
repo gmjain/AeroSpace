@@ -64,6 +64,8 @@ import Common // [FORK gmjain/AeroSpace]
 ///   2. visible:           the window is on a visible workspace, on the focused one (shown on no
 ///                         monitor after a display change, still not hidden), or on none -> accept; a
 ///                         click/chord token, if any, is spent by this acceptance.
+///   2b. native-fullscreen: hidden workspace, but the window is macOS-native fullscreen on its own Space
+///                         (reached by swipe / ctrl-arrow, which grant no token) -> accept; spend the token.
 ///   3. stale-own-pending: hidden workspace while our own request is still unanswered -> a stale or
 ///                         transient report; reject and re-assert the request (bounded).
 ///   4. strict-app:        hidden workspace, app in focus-steal-guard-apps -> reject, push back.
@@ -84,6 +86,18 @@ import Common // [FORK gmjain/AeroSpace]
     // change it can be shown on no monitor, and judging its windows as steals pushed the user's click
     // back (to the reported window itself when it was the focused one). updateFocusCache re-shows it.
     guard let targetWs = window.nodeWorkspace, !targetWs.isVisible, targetWs != focus.workspace else {
+        consumeUserInputToken(by: "accept:\(forkDebugDescribe(window))")
+        return true
+    }
+    // 2b. native-fullscreen (R-2026-10-04-02): the window lives on its own macOS Space, and only explicit
+    // navigation shows it (4-finger swipe, ctrl-arrow, Mission Control). Swipes and arrows grant no token,
+    // and its AeroSpace workspace is usually hidden: rule 6 rejected it and the push-back swapped the
+    // Space back; strict apps were rejected even after a click. Never a hidden-ws steal. Only windows
+    // already bound to the fullscreen container count (normalizeLayoutReason binds them; an AX
+    // AXFullScreen read would be an async round trip in this synchronous decision).
+    if window.parent is MacosFullscreenWindowsContainer {
+        forkDebugLog("updateFocusCache: ACCEPTED hidden-ws focus by \(forkDebugDescribe(window)) "
+            + "[native-fullscreen; \(userInputStateForLog)] (session: \(sessionTag))")
         consumeUserInputToken(by: "accept:\(forkDebugDescribe(window))")
         return true
     }
