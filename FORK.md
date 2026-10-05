@@ -27,9 +27,10 @@ same way in `~/git/config/aerospace/aerospace.toml`.
 [docs/fork/HISTORY.md](docs/fork/HISTORY.md).)
 
 ### 1. focus-follows-mouse: no re-raise of the focused window
-`Sources/AppBundle/mouse/focusFollowsMouse.swift` — started as a one-line guard
-(`window != focus.windowOrNil`, commit 1e1897a4); the file's current fork diff is ~120 lines (see
-the review/lag notes below and §9).
+`Sources/AppBundle/mouse/focusFollowsMouse.swift` — raise decision in `ffmShouldRaise`: always on
+a focus transition, else only when macOS disagrees and the window was not yet raised under the
+current native-focus observation. Started as a one-line guard (`window != focus.windowOrNil`,
+commit 1e1897a4); the file's fork diff is ~170 lines (see the notes below and §9).
 Upstream FFM re-raises the window under the mouse on every move; the AX raise dismisses the app's
 own popup windows (Chrome extension dropdowns, menubar-app panels). Related: upstream discussion
 #2177. **Best upstream-PR candidate**: submit only the minimal one-line commit (1e1897a4), not the
@@ -44,13 +45,20 @@ activate path) queued dozens of AX actions and made Chrome slower to confirm —
 as "FFM lag between two Chrome windows". Now: one raise per distinct native-focus observation
 (`ffmLastRaise`), runLightSession skips its sync raise when the body already asked for that window
 (`ownFocusRequestSeq`), and the AXFullScreen read is skipped for windows AeroSpace already manages.
-2026-09-12, root cause found and the rest unwound: the slowness was a **Chrome instance up for 19
+2026-09-12, root cause found: the slowness was a **Chrome instance up for 19
 days** answering every AX request in 200-350 ms (fork.12 trace: per hover, ~40 queued
 `AXUIElementCopyElementAtPosition` / `AXFocusedWindow` / raise calls released as one burst); after a
 Chrome update the same requests take 7-17 ms. A window-server hit test that bypassed AX (fork.13)
-was reverted as unneeded. Diagnose next time with
+was reverted as unneeded. Raise-once (`ffmLastRaise`, `ownFocusRequestSeq`) and the per-hover phase
+timing were **kept deliberately** (user decision 2026-10-04): raise-once still spares any slow app
+an AX flood, and the timing costs nothing while fork-debug-log is off. Diagnose next time with
 `osascript -l JavaScript ~/git/config/aerospace/scripts/ax-latency-probe.js` (in-process timing of
 AX reads/raises per app; >50 ms means the app, not the WM).
+2026-10-04: the observation behind `ffmLastRaise` is `nativeFocusObservationSeq`, a counter bumped
+by `updateFocusCache` whenever the last-known native focus changes. It was the observed window id,
+which returns to old values: after a second desktop click, hovering A no longer raised it and
+keystrokes went to Finder. Per-hover timing (`FfmHoverTiming`) exists only while fork-debug-log is
+on (no clock reads or log strings otherwise).
 
 ### 2. dump-tree / load-tree commands
 `Sources/AppBundle/tree/treeDump.swift`, `DumpTreeCommand`, `LoadTreeCommand`.
@@ -66,6 +74,14 @@ ones after every workspace has been rebuilt. Modeled on the internal
 server with stdin), lenient decoding (only `name`/`type` mandatory), a non-container root no
 longer crashes the server, floating windows are actually loaded, MRU / fullscreen / native-state
 windows round-trip, two-pass rebuild so auto-split-by-aspect can't mutate freshly rebuilt trees.
+2026-10-04 review fixes: the leftover pass crashed the server ("already unbound") whenever a tiled
+window opened after the dump — detached old roots were freed mid-load (weak parent links); they
+are now kept alive and leftovers picked by `nodeWorkspace == nil`. Monitors are matched by name +
+top-left corner (new `monitorName`/`monitorTopLeftX`/`monitorTopLeftY`), then name, then corner,
+then the old 1-based `monitorId`. Entries whose window id now belongs to another app (`app`
+mismatch; ids are reused) are skipped. A non-container root no longer drops that workspace's
+floating/native-state lists. Dumped ids are resolved before any tree is detached. Tests:
+`Sources/AppBundleTests/tree/TreeDumpTest.swift`.
 
 ### 3. restart command
 `RestartCommand` + auto-load hook in `initAppBundle.swift`.
@@ -73,16 +89,19 @@ Dumps state to `~/.local/state/aerospace/restart-tree.json`, spawns a relauncher
 the old pid to die** (quitting un-parks all windows via AX and takes seconds; a naive
 `sleep 1; open` races it and strands the user with no WM — learned the hard way) and then
 relaunches **this exact bundle by path** (`Bundle.main.bundleURL`, forwarding the server args);
-the next startup auto-loads the file if fresh (<90s). `--no-restore` skips state handling (and
-removes a stale state file).
+the next startup auto-loads the file if fresh (<90s, counted from the relaunch). `--no-restore`
+skips state handling (and removes a stale state file).
 2026-09-05 review fixes: relaunch by bundle path instead of `open -a AeroSpace` — LaunchServices
 resolved the *name* to whichever registered copy it preferred (observed: the xcode build-products
 bundle, leaving the live server's binary exposed to the next build; the gotcha is obsolete now),
 and dropped `--config-path`/`--read-only`; the pid wait is bounded at 10 min and then gives up
-loudly into `restart-failed.log` instead of firing a no-op `open`; termination is delayed 1.5 s
-(was 300 ms) so the ServerAnswer, written only after the session's `layoutWorkspaces`, reaches
-the CLI — proper fix (terminate right after `answerToClient` in `server.swift`) is tagged
-`TODO(review-2026-09-05)` in `RestartCommand.swift`.
+loudly into `restart-failed.log` instead of firing a no-op `open`.
+2026-10-04 review fixes: a CLI `restart` terminates in `server.swift` right after
+`answerToClient` (flag taken in the same main-actor turn as the command; hotkey/menu restarts
+terminate immediately) — the 1.5 s timer lost to slow layout passes and the CLI exited 1. The
+relauncher `touch`es `restart-tree.json` right before relaunching, so a slow quit no longer ages
+it past the 90 s window. A failed relaunch is logged to `restart-failed.log`;
+`RestartCommandTest` syntax-checks the generated script.
 
 ### 4. auto-split-by-aspect (config)
 `MacWindow.swift: unbindAndGetBindingDataForNewTilingWindow`.
@@ -95,8 +114,12 @@ with single-child containers.
 unwrapped by `getOrRegister` if the new window doesn't stay in it (`on-window-detected`
 move/float — every Telegram/Zoom launch —, closed-windows-cache restore, duplicate
 registration); previously the anchor was left alone in a redundant container, permanently with
-flatten-normalization off. A lone *nested* container is wrapped, not flipped: `changeOrientation`
-cascades through all ancestors when opposite-orientation normalization is on.
+flatten-normalization off. A lone *nested* container is never flipped while opposite-orientation
+normalization is on (`changeOrientation` cascades through all ancestors). Since 2026-10-04 the
+new window goes beside it in the grandparent when that already splits the desired way (tiles);
+the earlier wrapper got flattened into the grandparent and then flipped, splitting the wrong way.
+Other cases (accordion grandparent, not-yet-normalized orientations) still wrap. Tests:
+`Sources/AppBundleTests/tree/AutoSplitByAspectTest.swift`.
 
 ### 5. spawn-intent (config: spawn-intent-apps, spawn-intent-timeout-ms)
 `Sources/AppBundle/spawnIntent.swift` + hooks in `HotkeyBinding.swift`, `MacWindow.swift`.
@@ -105,9 +128,16 @@ listed app appearing within the timeout is born on that workspace, anchored to t
 (auto-split applies), and focused — immune to the detection-time focus race (upstream #1097),
 LaunchServices activation churn, and FFM MRU pollution. Includes a post-placement focus guard
 (`armSpawnFocusGuard`) against late same-app activation steals; since 2026-09-12 its lifetime is
-event-ordered (see §6): it ends when macOS confirms the placed window, a hotkey or physical input
-arrives, another app takes focus, AeroSpace itself picked the reported window, or after 3 refires.
-The 2 s `ContinuousClock` expiry is gone.
+event-ordered (see §6): it ends when a hotkey or physical input arrives, AeroSpace itself picked
+the reported window, the placed window is gone (window-server probe included), after 3 refires,
+or when updateFocusCache *accepts* a focus change to another window. macOS confirming the placed
+window does not end it (2026-10-04: placement and confirmation can share one session). Physical
+input after the keypress places the window without focusing or guarding it (2026-10-04: any
+granted click/chord, even on the same workspace; the user moved on, e.g. during the 3-5 s
+`open -n` fallback). The 2 s `ContinuousClock` expiry is gone.
+Known costs of the longer guard lifetime (open, see tasks.md): a *new* same-app window opened
+without input (cmd-n typed into the placed WezTerm window) is pushed back once like a steal; and
+cmd-m on the placed window followed by a same-app re-key may push back to the minimized window.
 
 2026-09-05 review fixes: (a) the intent is *peeked* before the async AX calls and consumed only
 once the window is registered with a tiling parent — dialogs, popups and duplicate registrations
@@ -126,8 +156,8 @@ had one too until 2026-09-12).
 ### 6. Event-order focus guard (config: focus-steal-guard-apps, focus-grant-chords)
 `Sources/AppBundle/focusCache.swift: updateFocusCache` + `Sources/AppBundle/userInput.swift`
 (built 2026-09-12 on branch `event-order-guard`, now on `main`; deployed status: verify with
-`aerospace --version`. The pre-rebase build fork.14 = 850dfa1c contained it; supersedes the
-app-list-only guard below).
+`aerospace --version`. The pre-rebase build fork.14 = 850dfa1c contained it with a broken liveness
+probe, fixed on `main` 2026-10-04; supersedes the app-list-only guard below).
 
 **Problem.** macOS reports a native focus change onto a window on a *hidden* workspace both for
 things the user did (cmd-tab, Dock click, Spotlight/Raycast launch, a link clicked in another app, a
@@ -143,11 +173,13 @@ accepted every unlisted app (regression cases below).
 anywhere in it (the 2 s spawn-guard expiry and the dropped timing-based proposal were the
 failed timing-based attempts; see History below and docs/fork/HISTORY.md). Two facts:
 - `pendingOwnFocus` — the window AeroSpace last asked macOS to focus and has not yet seen reported
-  back. `MacWindow.nativeFocus()` is the single choke point (light sessions' `focusAfter`, FFM,
-  spawn-intent placement, the guard push-backs, `garbageCollect`'s dead-window focus). Cleared by
-  that confirmation (checked before the last-known comparison, since push-backs re-focus the
-  already-known window), by physical input or a hotkey (the user acted; what macOS reports next is
-  theirs), or after 3 re-asserts.
+  back. `Window.nativeFocus()` (final; subclasses implement `nativeFocusImpl`) is the single choke
+  point (light sessions' `focusAfter`, FFM, spawn-intent placement, the guard push-backs,
+  `garbageCollect`'s dead-window focus). Cleared by that confirmation (checked before the
+  last-known comparison, since push-backs re-focus the already-known window), by physical input or
+  a hotkey (the user acted; what macOS reports next is theirs); after 3 re-asserts it stays as an
+  exhausted marker: no more re-asserts or push-backs to that window until confirmation,
+  input/hotkey, or a request for another window.
 - `userInputToken` — a physical input happened and no AeroSpace-observed effect has spent it.
   Granted by any mouse button going down, anywhere, and by the *release* of an app-switching chord
   (`focus-grant-chords`, default `['cmd-tab', 'cmd-shift-tab', 'cmd-backtick', 'cmd-space']`, hotkey
@@ -155,20 +187,26 @@ failed timing-based attempts; see History below and docs/fork/HISTORY.md). Two f
   activation rides the modifier release, so the token is granted on `flagsChanged` after the chord
   went down). Plain typing and cmd-c/v/s never grant one. A new input *replaces* the token; tokens
   never accumulate. Spent by the first observed effect: a hotkey binding firing
-  (`HotkeyBinding.swift`), `updateFocusCache` accepting a native focus change, or the focused window
-  being closed — detected in `garbageCollect` and, because `updateFocusCache` runs before garbage
-  collection in every session, also by a synchronous `CGWindowList` liveness probe of the previously
-  focused window right before rule 5. Same `NSEvent` global monitors as FFM.
+  (`HotkeyBinding.swift`; spent inside its light session, after that session's updateFocusCache),
+  `updateFocusCache` accepting a native focus change, or the focused window being closed (window
+  destroyed; off-screen windows such as minimized, hidden-app or other-Space count as alive;
+  hide-on-close apps are caught only by garbageCollect) — detected in `garbageCollect` and,
+  because `updateFocusCache` runs before garbage collection in every session, also by a
+  synchronous `CGWindowList` liveness probe of the previously focused window right before rule 5.
+  Same `NSEvent` global monitors as FFM.
 
 **Rules** for a reported window Y that differs from the last known native focus (popups return early
 as before, so a launcher panel never spends the cmd-space token):
-1. `own-confirmed` — Y is what AeroSpace asked for → accept (also releases the spawn guard).
+1. `own-confirmed` — Y is what AeroSpace asked for → accept.
 2. `visible` — Y's workspace is visible (or Y has none) → accept; spend the token if any.
 3. `stale-own-pending` — hidden ws while our own request is unanswered → reject, re-assert the
-   pending window (≤ 3 per request, then give up and clear).
+   pending window (≤ 3 per request; then give up: rules 4–6 still judge the report but reject it
+   without pushing back to that window).
 4. `strict-app` — hidden ws, app in `focus-steal-guard-apps` → reject + push back (the list is now
    the *strict* list; the 2026-09-05 fixes stay: record the stolen window as the app's
-   native-focused one before pushing back, accept when the focused workspace is empty).
+   native-focused one before pushing back, accept when the focused workspace is empty). All
+   push-backs (rules 3/4/6, spawn guard) go through `pushBackNativeFocus`, which records the
+   stolen window.
 5. `user-input:<kind>` — hidden ws with an unspent token → accept, spend it.
 6. `no-input` — hidden ws, nothing to justify it → machine-caused → reject + push back like 4.
 
@@ -209,7 +247,9 @@ cmd-modified AeroSpace hotkey may grant a token after the hotkey handler spent i
 handler order), harmless: the next hotkey/accept spends it; (4) strict-list apps still snap back on
 cmd-tab (rule 4 precedes 5) — the list is meant to shrink as the logs validate 5/6. Validation: a
 week of `grep 'hidden-ws' ~/.local/state/aerospace/fork-debug.log` — every `ACCEPTED … user-input`
-should match a real user action, every `REJECTED … no-input` a machine one.
+should match a real user action, every `REJECTED … no-input` a machine one. Logs before
+2026-10-04 have no `user-input:` lines (the probe was broken), so the week of logs restarts at
+this deploy.
 
 **History.** 2026-08: multi-instance apps (WezTerm runs one process per window) fire
 `AXFocusedWindowChanged` from background instances; upstream accepts every native focus event,
@@ -229,7 +269,7 @@ off-screen. 2026-09-05 review data on session-event discrimination: WezTerm stea
 re-rejected every session (fix (a)). The dropped timing-based proposal (cross-app
 activation + no hotkey in the last 2 s) and the "user-intent clock" idea (accept within ~1 s of a
 deliberate action) were both clock-based and are superseded by this model. The proposal diff was
-deleted in 1c7d830f; `git show 9675dd09` still shows it.
+deleted in d2a92ea0 (pre-rebase 1c7d830f); `git show 9675dd09` still shows it.
 
 ### 7. fork-debug-log (config)
 `Sources/AppBundle/forkDebugLog.swift`. Opt-in tracing to
@@ -240,6 +280,11 @@ was caught red-handed within seconds of enabling it.
 ObjC exception on ENOSPC/EBADF and would abort the WM), handle dropped on write failure,
 `syncForkDebugLog(config)` on reload closes it when disabled / when the file was deleted, and the
 `DateFormatter` is built once.
+2026-10-04: the log uses an O_APPEND fd (truncating it while the server runs no longer leaves NUL
+bytes); a deleted log is recreated on the next line; a failed open/write keeps logging off until
+the next config reload; the `setActiveWorkspace` hook does nothing with logging off (it used to
+call the `activeWorkspace` getter, which can rearrange monitors). Tests:
+`Sources/AppBundleTests/ForkDebugLogTest.swift`.
 
 ### 9. focus-follows-mouse: ignore macOS-native-fullscreen windows (2026-09-05)
 `Sources/AppBundle/mouse/focusFollowsMouse.swift` — `axWindowUnderMouse` now reads `AXFullScreen`
@@ -309,7 +354,8 @@ Gotchas (all learned in production):
   rejects unknown (new) keys.
 - New commands need a `docs/aerospace-<name>.adoc` (generate-cmd-help.sh produces the
   `<name>_help_generated` constant the parser references) + entries in `docs/commands.adoc`,
-  `cmdArgsManifest.swift` (2 places), `cmdManifest.swift`.
+  `cmdArgsManifest.swift` (2 places), `cmdManifest.swift`, and a line in
+  `grammar/commands-bnf-grammar.txt` (shell completion).
 - `aerospace config --get` cannot address fork-added config keys (cosmetic; they parse and work).
 - Adding config keys: `Config.swift` field + `parseConfig.swift` table entry (keys that use hotkey
   notation, like `focus-grant-chords`, are parsed manually after `key-mapping`, like `mode`).
@@ -335,4 +381,6 @@ Gotchas (all learned in production):
 - Upstream PR for #1 (FFM re-raise guard; the minimal one-line commit 1e1897a4 only),
   referencing discussion #2177.
 - Possibly upstream dump-tree/load-tree (#2173 and #57 are circling layout persistence).
+- Upstream PR sweep (adopt #2208, #2179 adapted) never executed: `docs/fork/upstream-prs.md`.
+  WM focus-steal survey: `docs/fork/focus-steal-research.md` (both archival, 2026-08).
 - Disable fork-debug-log once the alt-l/ws4 steal is confirmed dead in daily use.

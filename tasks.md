@@ -31,18 +31,28 @@ keep history linear.
 
 ### 1. Stop special-casing apps for focus stealing (SUPERSEDED by the event-order model)
 Status: built 2026-09-12 on branch `event-order-guard`; on `main`; deployed status: verify with
-`aerospace --version` (pre-rebase fork.14 = 850dfa1c contained it). Log validation is meaningless
-until the rule-5 liveness-probe bug (docs/fork/REVIEW.md) is fixed.
+`aerospace --version` (pre-rebase fork.14 = 850dfa1c contained it). The rule-5 liveness probe was
+broken in every deployed build; fixed on `main` 2026-10-04 (`fix/focus-guard`), awaiting deploy.
 `focus-steal-guard-apps` used to be the only defense; the "user-intent clock" (accept hidden-ws
-focus within ~1 s of a deliberate action) and the 2 s proposal (its diff was deleted in 1c7d830f;
-`git show 9675dd09`) were clock-based and are dropped. What landed instead (FORK.md §6): `pendingOwnFocus` (our own unanswered focus request) +
+focus within ~1 s of a deliberate action) and the 2 s proposal (its diff was deleted in d2a92ea0;
+`git show 9675dd09`) were clock-based and are dropped. What landed instead (FORK.md §6):
+`pendingOwnFocus` (our own unanswered focus request) +
 `userInputToken` (mouse-down / release of a `focus-grant-chords` chord, spent by the first observed
 effect), six ordered rules in `updateFocusCache`, no clock anywhere; the app list is now the
 *strict* list. The decision gate from the old plan is answered (session events don't discriminate).
 - Validate: `grep 'hidden-ws' ~/.local/state/aerospace/fork-debug.log` after a week — every
   `ACCEPTED … [user-input:…]` must be a real cmd-tab/click/launch, every `REJECTED … [no-input…]`
-  a machine one. Watch for `token=none(spent-by:accept:…)` on a rejected cmd-tab (limitations 3 and 4 in FORK.md §6).
+  a machine one. Watch for `token=none(spent-by:accept:…)` on a rejected cmd-tab (limitation 2 in
+  FORK.md §6). Restart the one-week clock at the deploy of `fix/focus-guard`: the old probe spent
+  every token as `close:`, so earlier logs never exercised rule 5 (0 `user-input:`, 40
+  `spent-by:close`). Also expect `gave up pushing back` and `spawnIntent: … NOT focused` lines.
 - Then: remove Chrome/Claude/WezTerm from `focus-steal-guard-apps` one at a time; drop the key.
+- Test delisting WezTerm (from `focus-steal-guard-apps`, then `spawn-intent-apps`) only after the
+  fixed build is deployed and observed (user decision 2026-10-04; its premise is obsolete: alt-enter
+  spawns through the mux, see docs/fork/HISTORY.md). Config untouched until then.
+- Spawn guard costs to watch (FORK.md §5): a same-app window opened without input (WezTerm cmd-n)
+  right after alt-enter is pushed back once; cmd-m on the placed window then a same-app re-key may
+  push back to the minimized window.
 - Not done here: making spawn-intent global (drop `spawn-intent-apps`) — separate change.
 - Acceptance unchanged: cmd-tab/Dock-click/Spotlight to hidden-workspace apps switch workspaces;
   no wrong-workspace alt-l landings; no focus steals after alt-enter; no self-flips (WhatsApp).
@@ -53,10 +63,10 @@ false (or remove the key) in aerospace.toml. Keep the feature in the fork — it
 found the last bug in seconds.
 
 ### 3. Upstream PR: FFM no-re-raise guard
-Submit only the minimal one-line commit (1e1897a4; the file's full fork diff is ~120 lines of
-hardening: isNativeFocused, ffmLastRaise, AXFullScreen reads, phase timing), referencing upstream
-discussion #2177. Surface the
-open design question in the PR: internal-focus vs native-focus desync (upstream may prefer
+Submit only the minimal one-line commit (1e1897a4; the file's full fork diff is ~170 lines of
+hardening: isNativeFocused, ffmShouldRaise/ffmLastRaise, AXFullScreen reads, phase timing),
+referencing upstream discussion #2177. Surface the open design question in the PR:
+internal-focus vs native-focus desync (upstream may prefer
 `window != focus.windowOrNil || nativeFocusedWindow != window` semantics). If it lands, drop the
 commit from the patch queue on the next rebase.
 
@@ -64,6 +74,11 @@ commit from the patch queue on the next rebase.
 Upstream #2173 (restore arrangement on monitor reconnect) and #57 (persist assignments) are
 circling layout persistence. Our treeDump.swift is close to PR-able; restart command is
 fork-flavored and probably stays ours.
+
+### 4b. Fix `aerospace-state` for the fixed load-tree (after deploy; out of repo)
+`~/git/config/aerospace/scripts/aerospace-state:283` calls `load-tree` without `--stdin` (the CLI
+then forwards no stdin), and the comment at `:285` ("load-tree leaves them be") is stale: floating
+windows are restored now. Fix only once the fixed binary is deployed.
 
 ### 5. Punted config polish (from earlier sessions)
 - Service-mode additions: `b = ['balance-sizes', 'mode main']`, `e = ['enable toggle', 'mode main']`.

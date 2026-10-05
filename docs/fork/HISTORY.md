@@ -100,8 +100,29 @@ mention "aerospace", all the unrelated word in application/openreview text, none
   `restart` can trigger it). High: spawn guard disarms at once (`spawnIntent.swift:93`).
   Medium: FFM dead after a second desktop click, restart reply race, slow-quit skips restore,
   `aerospace-state` calls `load-tree` without `--stdin`.
-- Fixes in progress on `fix/focus-guard`, `fix/tree-restart`, `fix/ffm-autosplit-log`;
-  review in `docs/fork/REVIEW.md`. Nothing pushed or deployed yet.
+- Fixes on `fix/focus-guard`, `fix/tree-restart`, `fix/ffm-autosplit-log`, merged as wave 1
+  (next entry). Whole-queue adversarial review: `docs/fork/REVIEW.md` on branch
+  `docs/review-2026-10-04` (not on `main` yet).
+
+**2026-10-04 fixes (wave 1, `748d7538`)**: merged to `main`, release build checked, not deployed.
+- User decisions: keep FFM raise-once + per-hover timing (FORK.md §1 corrected: "the rest unwound"
+  was wrong); decide WezTerm delisting only after the fixed build runs (tasks.md task 1); carry
+  the parked research docs into `docs/fork/` (done).
+- Focus guard (FORK.md §5/§6): the liveness probe works (an NSNumber-boxed CFArray matched no
+  window, so every window probed dead; now a raw-id CFArray; "gone" = destroyed, off-screen is
+  alive, a reviewer's `kCGWindowIsOnscreen` idea was rejected: other-Space fullscreen windows are
+  off-screen but alive). The spawn guard survives macOS's confirmation and ends only on
+  input/hotkey, accepted other-window change, a gone window or 3 refires. Input after the keypress
+  places the window unfocused. The hotkey spends the token after its session's updateFocusCache.
+  Push-backs share one helper; the rule 3 / rule 6 loop is bounded (exhausted marker).
+  `Window.nativeFocus` is final so test windows exercise the same bookkeeping.
+- FFM: raise-once keyed on a native-focus observation counter (second desktop click bug); timing
+  only with fork-debug-log on. Auto-split: lone nested container gets the window beside it.
+  fork-debug-log: O_APPEND, recreate after delete, stay off after a failure.
+- load-tree/restart (FORK.md §2/§3): leftover-pass crash, monitor matching by name+corner,
+  reused-id app check, restart terminates right after the CLI answer, relauncher touches the
+  state file, failed relaunch logged.
+- Tests 403 → 444. Known costs and leftovers: tasks.md task 1 and REVIEW.md R-items.
 
 ## Decisions (with why)
 
@@ -144,22 +165,24 @@ mention "aerospace", all the unrelated word in application/openreview text, none
 | 09-05 | PATH without homebrew: bash 3.2, xcodegen skipped | FORK.md gotcha |
 | 09-12 | stale WhatsApp report bounced a workspace switch | event-order guard |
 | 09-12 | Chrome-to-Chrome FFM lag | stale 19-day Chrome AX; update Chrome |
-| 10-04 | rule 5 dead, load-tree crash, spawn guard self-disarm | fix branches in progress |
+| 10-04 | rule 5 dead, load-tree crash, spawn guard self-disarm | wave 1 on `main` |
 
 ## Open threads
 
-- **Lost docs**: `focus-steal-research.md` and `upstream-prs.md` exist only on parked branch
-  `user-intent-clock` (3b816b1b). Carry them into `docs/fork/` or rely on the summary above.
-  The #2208/#2179 adoption plan was never executed.
+- **Recovered docs**: `focus-steal-research.md` and `upstream-prs.md` from parked branch
+  `user-intent-clock` (3b816b1b) now live in `docs/fork/` (2026-10-04). The #2208/#2179
+  adoption plan was never executed.
 - **WezTerm premise is obsolete**: modern WezTerm delegates even `open -n` to the existing GUI
   and alt-enter uses the mux. FORK.md §6 History still says "one process per window".
-  Delisting WezTerm from `focus-steal-guard-apps` / `spawn-intent-apps` was a recorded follow-up.
-- **FFM workarounds not unwound**: on 09-12 the user said to unwind workarounds the Chrome
-  update made unneeded; only the hit test was reverted. `ffmLastRaise`, `ownFocusRequestSeq` and
-  the phase timing remain in `focusFollowsMouse.swift` (FORK.md §1).
+  Delisting WezTerm from `focus-steal-guard-apps` / `spawn-intent-apps`: test after the fixed
+  build is deployed (tasks.md task 1).
+- **FFM workarounds**: on 09-12 the user said to unwind workarounds the Chrome update made
+  unneeded; only the hit test was reverted. On 10-04 the user decided to keep `ffmLastRaise`,
+  `ownFocusRequestSeq` and the phase timing (free with logging off; FORK.md §1). Settled.
 - Live config still lists WezTerm, Chrome and Claude in `focus-steal-guard-apps` and has
   `fork-debug-log = true`; both were planned to go after a week of clean logs.
-- Log validation of the event-order guard (`grep hidden-ws`) is meaningless until rule 5 is
-  fixed: deployed fork.14 never granted a user switch to an unlisted app.
+- Log validation of the event-order guard (`grep hidden-ws`): rule 5 is fixed on `main`
+  (2026-10-04); the week of logs restarts at that deploy. fork.14 never granted a user switch to
+  an unlisted app.
 - Upstream PR candidates: the minimal FFM guard commit only; dump-tree/load-tree via #1958.
 - Three-finger swipe to workspaces (tasks.md task 7); service-mode additions.
