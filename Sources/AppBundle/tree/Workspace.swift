@@ -145,6 +145,17 @@ extension CGPoint {
         if !isValidAssignment(workspace: workspace, screen: self) {
             return false
         }
+        // [FORK gmjain/AeroSpace] fork-debug-log: every assignment path funnels through here (MonitorInfo's
+        // setter, rearrangeWorkspacesOnMonitors), so this is where monitor changes are traced. The caches are
+        // read directly: the activeWorkspace getter rearranges monitors on a miss. Off: one Bool read.
+        if config.forkDebugLog && !forkDebugLogIsRearranging {
+            forkDebugLogActiveWorkspaceChange(
+                monitor: self,
+                from: screenPointToVisibleWorkspace[self],
+                to: workspace,
+                leaving: visibleWorkspaceToScreenPoint[workspace],
+            )
+        }
         if let prevMonitorPoint = visibleWorkspaceToScreenPoint[workspace] {
             visibleWorkspaceToScreenPoint.removeValue(forKey: workspace)
             screenPointToPrevVisibleWorkspace[prevMonitorPoint] =
@@ -180,6 +191,14 @@ private func rearrangeWorkspacesOnMonitors() {
     let oldScreenPointToVisibleWorkspace = screenPointToVisibleWorkspace
     screenPointToVisibleWorkspace = [:]
     visibleWorkspaceToScreenPoint = [:]
+    // [FORK gmjain/AeroSpace] fork-debug-log: one summary line instead of a "nil -> X" line per monitor
+    forkDebugLogIsRearranging = true
+    defer {
+        forkDebugLogIsRearranging = false
+        if config.forkDebugLog {
+            forkDebugLogRearrangement(from: oldScreenPointToVisibleWorkspace, to: screenPointToVisibleWorkspace)
+        }
+    }
 
     for newScreen in newScreens {
         if let existingVisibleWorkspace = newScreenToOldScreenMapping[newScreen].flatMap({ oldScreenPointToVisibleWorkspace[$0] }),
