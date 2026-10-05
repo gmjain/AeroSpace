@@ -22,6 +22,31 @@ final class TreeDumpTest: XCTestCase {
         assertEquals(Workspace.get(byName: "other").rootTilingContainer.children.count, 0)
     }
 
+    /// macOS reuses window ids: an entry whose id now names another app's window is skipped (the
+    /// window stays on its workspace as a leftover); a matching or absent `app` is honored.
+    func testReusedWindowIdOfAnotherAppIsSkipped() async {
+        let app = TestApp.shared.name
+        let ws = focus.workspace
+        let other = Workspace.get(byName: "other")
+        TestWindow.new(id: 1, parent: ws.rootTilingContainer)
+        TestWindow.new(id: 2, parent: ws.rootTilingContainer)
+        TestWindow.new(id: 3, parent: ws.rootTilingContainer)
+        TestWindow.new(id: 4, parent: ws.rootTilingContainer)
+        _ = Window.get(byId: 1)?.focusWindow()
+        var otherDump = WorkspaceDump(name: other.name)
+        otherDump.root = NodeDump(type: "container", children: [
+            NodeDump(type: "window", id: 1, app: "Some Other App"),
+            NodeDump(type: "window", id: 2, app: app),
+            NodeDump(type: "window", id: 3),
+        ])
+        otherDump.floating = [NodeDump(type: "window", id: 4, app: "Some Other App")]
+        await loadTree(TreeDump(focusedWindowId: 4, workspaces: [otherDump]))
+        assertEquals(other.rootTilingContainer.allLeafWindowsRecursive.map(\.windowId), [2, 3])
+        assertEquals(other.floatingWindows.map(\.windowId), [])
+        assertEquals(ws.rootTilingContainer.allLeafWindowsRecursive.map(\.windowId).sorted(), [1, 4])
+        assertEquals(focus.windowOrNil?.windowId, 1) // focusedWindowId is checked against its entry too
+    }
+
     func testDumpedMonitorMatching() {
         let laptop = FakeMonitor(name: "Built-in", x: 0)
         let dell = FakeMonitor(name: "DELL", x: 1920)
