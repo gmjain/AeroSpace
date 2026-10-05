@@ -90,8 +90,9 @@ private let chordModifierMask: NSEvent.ModifierFlags = [.command, .control, .opt
     lastUserInputKind = kind
     lastUserInputSpentBy = nil
     // The user acted: whatever AeroSpace asked macOS for before is superseded by what macOS
-    // reports next.
+    // reports next. Same for the spawn focus guard.
     pendingOwnFocus = nil
+    clearSpawnFocusGuard()
 }
 
 /// Spends the token. Returns whether there was one.
@@ -131,6 +132,7 @@ private let chordModifierMask: NSEvent.ModifierFlags = [.command, .control, .opt
     pendingOwnFocus = nil
     windowLivenessForTests = nil
     windowOnScreenForTests = nil
+    clearSpawnFocusGuard()
 }
 
 // ------------------------------------------------------------ own focus

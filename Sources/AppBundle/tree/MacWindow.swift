@@ -73,6 +73,7 @@ final class MacWindow: Window {
             } else {
                 _ = window.focusWindow()
                 window.nativeFocus()
+                armSpawnFocusGuard(windowId)
             }
         }
         return window

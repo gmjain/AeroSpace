@@ -122,6 +122,22 @@ final class SpawnIntentTest: XCTestCase {
         assertEquals(peekSpawnIntent(for: TestApp.shared)?.windowId, nil)
     }
 
+    /// focus-follows-mouse or a CLI `focus` moved AeroSpace's focus to another window of the same app
+    /// and asked macOS for it: not an activation steal. The guard lets it through and ends.
+    func testSpawnFocusGuardReleasedWhenAeroSpaceChoseTheWindow() {
+        let anchor = TestWindow.new(id: 1, parent: focus.workspace.rootTilingContainer)
+        let placed = TestWindow.new(id: 2, parent: focus.workspace.rootTilingContainer)
+        _ = placed.focusWindow()
+        updateFocusCache(placed)
+        armSpawnFocusGuard(placed.windowId)
+        _ = anchor.focusWindow()
+        anchor.nativeFocus()
+        updateFocusCache(anchor)
+        assertEquals(spawnFocusGuardWindowId, nil)
+        assertEquals(focus.windowOrNil, anchor)
+        assertEquals(TestApp.shared.focusedWindow, anchor) // not pushed back to the placed window
+    }
+
     /// alt-enter on ws1, then a click/cmd-tab elsewhere before the window shows up: the window is still
     /// placed per the intent, but the focus part is superseded (no yank back, no guard).
     func testLaterPhysicalInputSupersedesIntentFocus() {

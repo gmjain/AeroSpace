@@ -16,6 +16,11 @@ import Common // [FORK gmjain/AeroSpace]
     if nativeFocused?.parent is MacosPopupWindowsContainer {
         return
     }
+    // [FORK gmjain/AeroSpace] reject same-app activation steals right after
+    // a spawn-intent placement (see spawnIntent.swift).
+    if rejectStolenNativeFocus(nativeFocused) {
+        return
+    }
     // [FORK gmjain/AeroSpace] macOS answered AeroSpace's own focus request. Checked before the
     // lastKnown comparison: the requested window may already have been the last known native
     // focus (push-backs re-focus it), and the request must still be marked answered.
@@ -25,6 +30,7 @@ import Common // [FORK gmjain/AeroSpace]
         if let nativeFocused, !acceptNativeFocusChange(nativeFocused, ownConfirmed: ownConfirmed) {
             return
         }
+        if let nativeFocused { releaseSpawnFocusGuard(acceptedFocusChangeTo: nativeFocused) } // [FORK gmjain/AeroSpace]
         // [FORK gmjain/AeroSpace] the moment macOS-side focus changes get
         // accepted — the usual culprit when workspaces flip "by themselves".
         if let nativeFocused, nativeFocused.nodeWorkspace != focus.workspace {
