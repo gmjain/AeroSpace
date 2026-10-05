@@ -1,6 +1,9 @@
 extension Workspace {
     @MainActor func normalizeContainers() {
         rootTilingContainer.unbindEmptyAndAutoFlatten() // Beware! rootTilingContainer may change after this line of code
+        if !config.enableNormalizationFlattenContainers { // [FORK gmjain/AeroSpace] flatten-on already covers it
+            flattenRedundantAutoSplitWrappers(rootTilingContainer) // rootTilingContainer may change here too
+        }
         if config.enableNormalizationOppositeOrientationForNestedContainers {
             rootTilingContainer.normalizeOppositeOrientationForNestedContainers()
         }

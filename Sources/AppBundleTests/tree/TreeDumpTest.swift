@@ -106,6 +106,27 @@ final class TreeDumpTest: XCTestCase {
         assertEquals(focus.windowOrNil?.windowId, 4)
     }
 
+    /// Auto-split wrappers stay tagged across a restart, so normalization can still flatten them once they are
+    /// down to one child (R-2026-10-04-03).
+    func testAutoSplitWrapperTagRoundTrips() async throws {
+        let ws = focus.workspace
+        ws.rootTilingContainer.apply {
+            TestWindow.new(id: 1, parent: $0)
+            TilingContainer(parent: $0, adaptiveWeight: 1, .v, .tiles, index: INDEX_BIND_LAST).apply {
+                $0.isAutoSplitWrapper = true
+                TestWindow.new(id: 2, parent: $0)
+                TestWindow.new(id: 3, parent: $0)
+            }
+        }
+        let before = dumpTreeJson()
+        assertTrue(before.contains(#""autoSplit" : true"#))
+        Window.get(byId: 3)?.bind(to: ws.rootTilingContainer, adaptiveWeight: 1, index: 0)
+        await loadTree(try JSONDecoder().decode(TreeDump.self, from: Data(before.utf8)))
+        assertEquals(dumpTreeJson(), before)
+        let wrapper = try XCTUnwrap(Window.get(byId: 2)?.parent as? TilingContainer)
+        assertTrue(wrapper.isAutoSplitWrapper)
+    }
+
     /// The two-pass rebuild: a's old root holds window 1 that b's entry claims later in the same
     /// load; only the truly unclaimed window 2 is re-tiled onto a.
     func testWindowClaimedByLaterWorkspaceIsNotRetiled() async {

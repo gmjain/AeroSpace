@@ -5,6 +5,10 @@ final class TilingContainer: TreeNode, NonLeafTreeNodeObject { // todo consider 
     fileprivate var _orientation: Orientation
     var orientation: Orientation { _orientation }
     var layout: Layout
+    /// [FORK gmjain/AeroSpace] created by auto-split-by-aspect to wrap the MRU window. Flattened once it is
+    /// down to one child, even with enable-normalization-flatten-containers = false
+    /// (see flattenRedundantAutoSplitWrappers).
+    var isAutoSplitWrapper = false
 
     @MainActor
     init(parent: NonLeafTreeNodeObject, adaptiveWeight: CGFloat, _ orientation: Orientation, _ layout: Layout, index: Int) {

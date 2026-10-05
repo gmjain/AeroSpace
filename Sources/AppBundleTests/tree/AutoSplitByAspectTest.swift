@@ -136,4 +136,69 @@ final class AutoSplitByAspectTest: XCTestCase {
             .window(3),
         ]))
     }
+
+    /// R-2026-10-04-03: with flatten normalization off (the live config), each "a sibling opens, a window wraps the
+    /// anchor, both close" episode used to leave one more single-child wrapper around the anchor (depth 4 after 3).
+    func testWrappersDoNotAccumulateWithFlattenOff() async throws {
+        let workspace = Workspace.get(byName: name)
+        let anchor = mru(1, parent: workspace.rootTilingContainer, rect: wide)
+        for episode: UInt32 in 1 ... 3 {
+            anchor.lastAppliedLayoutPhysicalRect = wide
+            anchor.markAsMostRecentChild()
+            let sibling = try await detectNewWindow(10 * episode, on: workspace)
+            anchor.lastAppliedLayoutPhysicalRect = tall
+            anchor.markAsMostRecentChild()
+            let transient = try await detectNewWindow(10 * episode + 1, on: workspace) // wraps the anchor
+            assertTrue((anchor.parent as? TilingContainer)?.isAutoSplitWrapper == true)
+            transient.unbindFromParent()
+            sibling.unbindFromParent()
+            workspace.normalizeContainers()
+            assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([.window(1)]))
+        }
+        assertTrue(anchor.parent === workspace.rootTilingContainer)
+    }
+
+    /// A wrapper built before the tag existed (or loaded from an older dump) is untagged. Chains of single-child
+    /// containers collapse with auto-split on; the innermost one, holding the window, stays (`split` makes those).
+    func testUntaggedSingleChildContainerChainCollapses() async throws {
+        let workspace = Workspace.get(byName: name)
+        var anchor: TestWindow? = nil
+        workspace.rootTilingContainer.apply {
+            TilingContainer.newHTiles(parent: $0, adaptiveWeight: 1, index: INDEX_BIND_LAST).apply {
+                TilingContainer.newVTiles(parent: $0, adaptiveWeight: 1, index: INDEX_BIND_LAST).apply {
+                    TilingContainer.newHTiles(parent: $0, adaptiveWeight: 1, index: INDEX_BIND_LAST).apply {
+                        anchor = TestWindow.new(id: 1, parent: $0)
+                    }
+                }
+                TestWindow.new(id: 2, parent: $0)
+            }
+        }
+        anchor?.markAsMostRecentChild()
+        workspace.normalizeContainers()
+        assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([.h_tiles([.window(1)]), .window(2)]))
+        assertEquals(workspace.mostRecentWindowRecursive?.windowId, 1)
+    }
+
+    /// Upstream behavior for flatten-off users without auto-split: untagged single-child containers stay. A
+    /// tagged wrapper is still the fork's own and is flattened.
+    func testUntaggedSingleChildContainersKeptWithAutoSplitOff() async throws {
+        config.autoSplitByAspect = false
+        let workspace = Workspace.get(byName: name)
+        workspace.rootTilingContainer.apply {
+            TilingContainer.newVTiles(parent: $0, adaptiveWeight: 1, index: INDEX_BIND_LAST).apply {
+                TilingContainer.newHTiles(parent: $0, adaptiveWeight: 1, index: INDEX_BIND_LAST).apply {
+                    TestWindow.new(id: 1, parent: $0)
+                }
+            }
+            TilingContainer.newVTiles(parent: $0, adaptiveWeight: 1, index: INDEX_BIND_LAST).apply {
+                $0.isAutoSplitWrapper = true
+                TestWindow.new(id: 2, parent: $0)
+            }
+        }
+        workspace.normalizeContainers()
+        assertEquals(workspace.rootTilingContainer.layoutDescription, .h_tiles([
+            .v_tiles([.h_tiles([.window(1)])]),
+            .window(2),
+        ]))
+    }
 }

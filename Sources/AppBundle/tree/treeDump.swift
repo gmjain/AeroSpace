@@ -36,6 +36,7 @@ struct NodeDump: Codable, Sendable {
     var weight: Double? = nil
     var mru: Bool? = nil // true on the parent's most-recently-used child (accordion's expanded one)
     var children: [NodeDump]? = nil
+    var autoSplit: Bool? = nil // containers: auto-split-by-aspect wrapper (TilingContainer.isAutoSplitWrapper)
     var id: UInt32? = nil // windows
     var app: String? = nil // windows: load-tree skips the entry when the id now belongs to another app
     var fullscreen: Bool? = nil // windows: AeroSpace `fullscreen` state
@@ -114,6 +115,7 @@ extension WorkspaceDump {
             dump.layout = c.layout.rawValue
             dump.weight = weightOrNil(c)
             dump.mru = isMru ? true : nil
+            dump.autoSplit = c.isAutoSplitWrapper ? true : nil
             let mruChild = c.mostRecentChild
             dump.children = c.children.map { dumpNode($0, isMru: $0 === mruChild) }
             return dump
@@ -272,6 +274,7 @@ private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject, _ live: 
                 layout,
                 index: INDEX_BIND_LAST,
             )
+            container.isAutoSplitWrapper = dump.autoSplit ?? false
             var mruChild: TreeNode? = nil
             for childDump in dump.children ?? [] {
                 let child = buildNode(childDump, parent: container, live)

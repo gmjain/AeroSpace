@@ -317,6 +317,7 @@ func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: W
                         .tiles,
                         index: prevBinding.index,
                     )
+                    newParent.isAutoSplitWrapper = true
                     mruWindow.bind(to: newParent, adaptiveWeight: WEIGHT_AUTO, index: 0)
                     return BindingData(
                         parent: newParent,
@@ -357,6 +358,41 @@ func dropAutoSplitWrapperIfRedundant(_ wrapper: TilingContainer?) {
         mru?.markAsMostRecentChild()
     } else {
         child.markAsMostRecentChild()
+    }
+}
+
+// [FORK gmjain/AeroSpace] auto-split-by-aspect, normalization step (R-2026-10-04-03). With
+// enable-normalization-flatten-containers = false nothing removes a wrapper that a later close left with one
+// child, and the next split of that window nests a new wrapper inside it: one level per episode (live: Telegram
+// under 12). Run from Workspace.normalizeContainers when flatten normalization is off, bottom-up, and flattens:
+// - a single-child auto-split wrapper (isAutoSplitWrapper): the fork made it, upstream would never have;
+// - with auto-split-by-aspect on, any container whose only child is a container. Upstream can make those too
+//   (split / join-with leftovers), but they change no layout, and they are how wrappers built before the tag
+//   existed (or loaded from an older dump) look. Single-child containers holding a window are kept unless
+//   tagged: that is what `split` makes on purpose.
+// Users with flatten normalization on, or with auto-split-by-aspect off and no wrappers, see no change.
+// MRU bookkeeping mirrors unbindEmptyAndAutoFlatten. Internal for tests.
+@MainActor
+func flattenRedundantAutoSplitWrappers(_ container: TilingContainer) {
+    for case let child as TilingContainer in container.children {
+        flattenRedundantAutoSplitWrappers(child)
+    }
+    guard let only = container.children.singleOrNil(),
+          container.isAutoSplitWrapper || (config.autoSplitByAspect && only is TilingContainer) else { return }
+    if container.parent is TilingContainer {
+        dropAutoSplitWrapperIfRedundant(container)
+    } else if let only = only as? TilingContainer, let workspace = container.parent as? Workspace {
+        // Root container: its only child container becomes the root. A lone window stays (a Workspace may only
+        // hold containers).
+        let mru = workspace.mostRecentChild
+        only.unbindFromParent()
+        let binding = container.unbindFromParent()
+        only.bind(to: binding.parent, adaptiveWeight: binding.adaptiveWeight, index: binding.index)
+        if mru != container {
+            mru?.markAsMostRecentChild()
+        } else {
+            only.markAsMostRecentChild()
+        }
     }
 }
 
