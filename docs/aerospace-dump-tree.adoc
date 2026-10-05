@@ -1,0 +1,72 @@
+= aerospace-dump-tree(1)
+include::util/man-attributes.adoc[]
+// tag::purpose[]
+:manpurpose: [FORK] Dump all workspace layout trees as JSON
+// end::purpose[]
+:manname: aerospace-dump-tree
+
+// =========================================================== Synopsis
+== Synopsis
+[verse]
+// tag::synopsis[]
+aerospace dump-tree [-h|--help]
+
+// end::synopsis[]
+
+// =========================================================== Description
+== Description
+
+// tag::body[]
+{manpurpose}
+
+Prints a JSON document describing every workspace: its monitor, visibility,
+focus, the full tiling tree (containers with orientation, layout, weights and
+most-recent child; windows with ids and `fullscreen` state), floating windows,
+and windows in macOS native fullscreen or of hidden apps. The output is accepted
+by xref:commands.adoc#load-tree[aerospace-load-tree] and is written
+automatically by xref:commands.adoc#restart[aerospace-restart].
+
+// =========================================================== Options
+include::util/conditional-options-header.adoc[]
+
+-h, --help:: Print help
+
+// =========================================================== Output Format
+include::util/conditional-output-format-header.adoc[]
+
+Top-level object:
+
+focusedWindowId:: Number. Id of the focused window, if any
+workspaces:: Array of workspace objects
+
+Workspace object:
+
+name:: String. Workspace name
+monitorId:: Number. 1-based monitor index (same numbering as `list-monitors`).
+`load-tree` falls back to it when no monitor matches `monitorName` / the top-left corner
+monitorName:: String. Name of the workspace's monitor
+monitorTopLeftX, monitorTopLeftY:: Number. Top-left corner of the workspace's monitor
+visible:: Boolean. The workspace is visible on its monitor
+focused:: Boolean. The workspace is focused
+root:: Node. The tiling tree; always a container
+floating:: Array of window nodes. Floating windows
+macosFullscreen:: Array of window nodes (`id`, `app` only). Windows in macOS native fullscreen
+macosHidden:: Array of window nodes (`id`, `app` only). Windows of macOS-hidden apps
+
+Node object (fields that don't apply, or have their default, are omitted):
+
+type:: String. `container` or `window`
+orientation:: String. Containers: `h` or `v`
+layout:: String. Containers: `tiles` or `accordion`
+children:: Array of nodes. Containers
+weight:: Number. Size weight along the parent container's orientation
+mru:: Boolean. `true` on the parent's most-recently-used child (an accordion's expanded one)
+id:: Number. Windows: window id
+app:: String. Windows: app name. `load-tree` skips an entry whose window id now belongs to another app
+fullscreen:: Boolean. Windows: AeroSpace `fullscreen` state
+noOuterGapsInFullscreen:: Boolean. Windows: `fullscreen --no-outer-gaps`
+
+// end::body[]
+
+// =========================================================== Footer
+include::util/man-footer.adoc[]

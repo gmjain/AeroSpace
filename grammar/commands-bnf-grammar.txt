@@ -21,6 +21,9 @@ aerospace -h;
 
     | debug-windows [--window-id <window_id>]
 
+    # [FORK gmjain/AeroSpace]
+    | dump-tree
+
     | echo [--stderr|--window <window_id>]... --
 
     | enable toggle
@@ -52,6 +55,9 @@ aerospace -h;
 
     | layout [--window-id <window_id>|--root|--workspace <workspace>|--fail-if-noop]... (<layouts>)... [--window-id <window_id>|--root|--workspace <workspace>|--fail-if-noop]...
     | layout (--for-next-detected-window|tiling|floating)...
+
+    # [FORK gmjain/AeroSpace]
+    | load-tree [--stdin|--no-stdin]
 
     | macos-native-fullscreen [--fail-if-noop|--window-id <window_id>]... [on|off] [--fail-if-noop|--window-id <window_id>]...
 

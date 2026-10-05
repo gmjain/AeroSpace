@@ -6,6 +6,7 @@ public enum CmdKind: String, CaseIterable, Equatable, Sendable {
     case closeAllWindowsButCurrent = "close-all-windows-but-current"
     case config
     case debugWindows = "debug-windows"
+    case dumpTree = "dump-tree" // [FORK gmjain/AeroSpace]
     case echo
     case enable
     case eval
@@ -26,6 +27,7 @@ public enum CmdKind: String, CaseIterable, Equatable, Sendable {
     case listMonitors = "list-monitors"
     case listWindows = "list-windows"
     case listWorkspaces = "list-workspaces"
+    case loadTree = "load-tree" // [FORK gmjain/AeroSpace]
     case macosNativeFullscreen = "macos-native-fullscreen"
     case macosNativeMinimize = "macos-native-minimize"
     case mode
@@ -66,6 +68,8 @@ func initSubcommands() -> [String: any SubCommandParserProtocol] {
                 result[kind.rawValue] = SubCommandParser(parseConfigCmdArgs)
             case .debugWindows:
                 result[kind.rawValue] = SubCommandParser(DebugWindowsCmdArgs.init)
+            case .dumpTree: // [FORK gmjain/AeroSpace]
+                result[kind.rawValue] = SubCommandParser(DumpTreeCmdArgs.init)
             case .echo:
                 result[kind.rawValue] = SubCommandParser(EchoCmdArgs.init)
             case .enable:
@@ -102,6 +106,8 @@ func initSubcommands() -> [String: any SubCommandParserProtocol] {
                 result[kind.rawValue] = SubCommandParser(parseListWindowsCmdArgs)
             case .listWorkspaces:
                 result[kind.rawValue] = SubCommandParser(parseListWorkspacesCmdArgs)
+            case .loadTree: // [FORK gmjain/AeroSpace]
+                result[kind.rawValue] = SubCommandParser(LoadTreeCmdArgs.init)
             case .macosNativeFullscreen:
                 result[kind.rawValue] = SubCommandParser(parseMacosNativeFullscreenCmdArgs)
             case .macosNativeMinimize:

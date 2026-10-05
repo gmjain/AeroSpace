@@ -19,6 +19,9 @@ let config_help_generated = """
 let debug_windows_help_generated = """
     USAGE: debug-windows [-h|--help] [--window-id <window-id>]
     """
+let dump_tree_help_generated = """
+    USAGE: dump-tree [-h|--help]
+    """
 let echo_help_generated = """
     USAGE: echo [-h|--help] [--stderr] [--window-id <window-id>] -- <string>...
     """
@@ -96,6 +99,9 @@ let list_workspaces_help_generated = """
     USAGE: list-workspaces [-h|--help] --monitor <monitor>... [--visible [no]] [--empty [no]] [--format <output-format>] [--count] [--json]
        OR: list-workspaces [-h|--help] --all [--format <output-format>] [--count] [--json]
        OR: list-workspaces [-h|--help] --focused [--format <output-format>] [--count] [--json]
+    """
+let load_tree_help_generated = """
+    USAGE: load-tree [-h|--help] [--stdin|--no-stdin]
     """
 let macos_native_fullscreen_help_generated = """
     USAGE: macos-native-fullscreen [-h|--help] [--window-id <window-id>]

@@ -95,12 +95,20 @@ struct Main {
                         """,
                 )
             }
+            // [FORK gmjain/AeroSpace] load-tree consumes a whole dump-tree document
+            // (pretty-printed, 6+ lines per window), so it is capped by size, not lines.
+            let isLoadTree = parsedArgs is LoadTreeCmdArgs
             var index = 0
+            var byteCount = 0 // [FORK gmjain/AeroSpace]
             while let line = readLine(strippingNewline: false) {
                 stdin += line
                 index += 1
-                if index > 1000 {
+                byteCount += line.utf8.count // [FORK gmjain/AeroSpace]
+                if !isLoadTree && index > 1000 { // [FORK gmjain/AeroSpace] upstream: index > 1000
                     exit(failExitCode, err: "stdin number of lines limit is exceeded")
+                }
+                if byteCount > 4 * 1024 * 1024 { // [FORK gmjain/AeroSpace] size cap for every command
+                    exit(failExitCode, err: "stdin size limit (4 MiB) is exceeded")
                 }
             }
         }
