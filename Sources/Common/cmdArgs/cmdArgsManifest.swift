@@ -69,7 +69,7 @@ func initSubcommands() -> [String: any SubCommandParserProtocol] {
                 result[kind.rawValue] = SubCommandParser(parseConfigCmdArgs)
             case .debugWindows:
                 result[kind.rawValue] = SubCommandParser(DebugWindowsCmdArgs.init)
-            case .dumpTree:
+            case .dumpTree: // [FORK gmjain/AeroSpace]
                 result[kind.rawValue] = SubCommandParser(DumpTreeCmdArgs.init)
             case .echo:
                 result[kind.rawValue] = SubCommandParser(EchoCmdArgs.init)
@@ -107,7 +107,7 @@ func initSubcommands() -> [String: any SubCommandParserProtocol] {
                 result[kind.rawValue] = SubCommandParser(parseListWindowsCmdArgs)
             case .listWorkspaces:
                 result[kind.rawValue] = SubCommandParser(parseListWorkspacesCmdArgs)
-            case .loadTree:
+            case .loadTree: // [FORK gmjain/AeroSpace]
                 result[kind.rawValue] = SubCommandParser(LoadTreeCmdArgs.init)
             case .macosNativeFullscreen:
                 result[kind.rawValue] = SubCommandParser(parseMacosNativeFullscreenCmdArgs)
@@ -133,7 +133,7 @@ func initSubcommands() -> [String: any SubCommandParserProtocol] {
                 result[kind.rawValue] = SubCommandParser(ReloadConfigCmdArgs.init)
             case .resize:
                 result[kind.rawValue] = SubCommandParser(parseResizeCmdArgs)
-            case .restart:
+            case .restart: // [FORK gmjain/AeroSpace]
                 result[kind.rawValue] = SubCommandParser(RestartCmdArgs.init)
             case .runCallback:
                 result[kind.rawValue] = SubCommandParser(parseRunCallbackCmdArgs)

@@ -19,15 +19,19 @@ aerospace load-tree [-h|--help] [--stdin|--no-stdin]
 // tag::body[]
 {manpurpose}
 
-Reads JSON produced by xref:dump-tree.adoc[aerospace-dump-tree] from stdin and
-reconstructs each workspace: workspace-to-monitor assignment, the tiling tree
-(pulling windows from other workspaces when needed), floating windows, windows
-in macOS native fullscreen or of hidden apps, per-container most-recent child
-(the expanded accordion tab), the `fullscreen` state of windows, the visible
-workspace per monitor, and the focused window. Windows mentioned in the dump
-that no longer exist are skipped; windows macOS currently holds minimized,
-fullscreen or hidden are left where that state put them; live windows not
-mentioned are force-retiled onto their workspace.
+Reads JSON produced by xref:commands.adoc#dump-tree[aerospace-dump-tree] from
+stdin and reconstructs each workspace: workspace-to-monitor assignment, the
+tiling tree (pulling windows from other workspaces when needed), floating
+windows, windows in macOS native fullscreen or of hidden apps, per-container
+most-recent child (the expanded accordion tab), the `fullscreen` state of
+windows, the visible workspace per monitor, and the focused window. Windows
+mentioned in the dump that no longer exist, or whose id now belongs to another
+app, are skipped; windows macOS currently holds minimized, fullscreen or hidden
+are left where that state put them; live windows not mentioned are
+force-retiled onto their workspace.
+
+Monitors are matched by name and top-left corner, then by name alone, then by
+corner alone, then by the 1-based `monitorId` (the only key in older dumps).
 
 Only `name` (workspaces) and `type` (nodes) are mandatory in the document;
 every other field defaults when absent, so hand-edited JSON works.

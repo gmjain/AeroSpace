@@ -18,7 +18,7 @@ extension CmdArgs {
                 command = ConfigCommand(args: self as! ConfigCmdArgs)
             case .debugWindows:
                 command = DebugWindowsCommand(args: self as! DebugWindowsCmdArgs)
-            case .dumpTree:
+            case .dumpTree: // [FORK gmjain/AeroSpace]
                 command = DumpTreeCommand(args: self as! DumpTreeCmdArgs)
             case .echo:
                 command = EchoCommand(args: self as! EchoCmdArgs)
@@ -54,7 +54,7 @@ extension CmdArgs {
                 command = ListWindowsCommand(args: self as! ListWindowsCmdArgs)
             case .listWorkspaces:
                 command = ListWorkspacesCommand(args: self as! ListWorkspacesCmdArgs)
-            case .loadTree:
+            case .loadTree: // [FORK gmjain/AeroSpace]
                 command = LoadTreeCommand(args: self as! LoadTreeCmdArgs)
             case .macosNativeFullscreen:
                 command = MacosNativeFullscreenCommand(args: self as! MacosNativeFullscreenCmdArgs)
@@ -76,7 +76,7 @@ extension CmdArgs {
                 command = ReloadConfigCommand(args: self as! ReloadConfigCmdArgs)
             case .resize:
                 command = ResizeCommand(args: self as! ResizeCmdArgs)
-            case .restart:
+            case .restart: // [FORK gmjain/AeroSpace]
                 command = RestartCommand(args: self as! RestartCmdArgs)
             case .runCallback:
                 command = RunCallbackCommand(args: self as! RunCallbackCmdArgs)
