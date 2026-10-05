@@ -19,17 +19,22 @@ aerospace restart [-h|--help] [--no-restore]
 // tag::body[]
 {manpurpose}
 
-Saves the full layout state (see xref:dump-tree.adoc[aerospace-dump-tree]) to
-`~/.local/state/aerospace/restart-tree.json`, relaunches the running
+Saves the full layout state (see xref:commands.adoc#dump-tree[aerospace-dump-tree])
+to `~/.local/state/aerospace/restart-tree.json`, relaunches the running
 AeroSpace.app bundle (by path, forwarding its server arguments such as
 `--config-path`) once the old instance has fully exited, and reloads the state
 automatically during the next startup. Workspaces, layout trees, weights,
 floating windows, per-container most-recent child, visible workspaces, and the
-focused window survive the restart.
+focused window survive the restart. The state file is reloaded only if it is
+less than 90 seconds old; the relauncher touches it right before relaunching,
+so a slow quit doesn't age it out.
+
+When run from the CLI, the server exits right after the CLI has received its
+answer.
 
 If the old instance is still alive after 10 minutes the relauncher gives up
-without relaunching and appends a line to
-`~/.local/state/aerospace/restart-failed.log`.
+without relaunching, and if the relaunch itself fails it logs that too; both
+append a line to `~/.local/state/aerospace/restart-failed.log`.
 
 // =========================================================== Options
 include::util/conditional-options-header.adoc[]
