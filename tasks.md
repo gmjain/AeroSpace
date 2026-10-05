@@ -30,9 +30,9 @@ keep history linear.
 ## Active tasks
 
 ### 1. Stop special-casing apps for focus stealing (SUPERSEDED by the event-order model)
-Status: built 2026-09-12 on branch `event-order-guard`; on `main`; deployed status: verify with
-`aerospace --version` (pre-rebase fork.14 = 850dfa1c contained it). The rule-5 liveness probe was
-broken in every deployed build; fixed on `main` 2026-10-04 (`fix/focus-guard`), awaiting deploy.
+Status: deployed 2026-10-04 20:46 as fork.15 = 9d0aabe9 (all wave 1–3 fixes). The rule-5
+liveness probe was broken in every earlier build (fork.14 = 850dfa1c and before). The one-week
+validation clock starts at this deploy.
 `focus-steal-guard-apps` used to be the only defense; the "user-intent clock" (accept hidden-ws
 focus within ~1 s of a deliberate action) and the 2 s proposal (its diff was deleted in d2a92ea0;
 `git show 9675dd09`) were clock-based and are dropped. What landed instead (FORK.md §6):
@@ -54,8 +54,9 @@ don't discriminate).
 - Wave 2 (2026-10-04, `integrate/wave2`, awaiting deploy) changes what the log shows: rejections
   spend the token (`spent-by:reject:<rule>:…`), `[native-fullscreen; …]` accepts, `focused ws N
   was on no monitor -> re-shown` lines, dated timestamps (split the week by day).
-- After the wave-2 deploy: `aerospace dump-tree` on ws9 should show Telegram under at most one
-  container (R-03 flattens the 12-level chain at the next normalization).
+- Done 2026-10-04 (fork.15): ws9 tree depth went 12 -> 2 right after the deploy (R-03).
+- Next: test delisting WezTerm from `focus-steal-guard-apps` / `spawn-intent-apps` (mux = one GUI
+  process, so the original premise is gone) once the week of logs looks clean.
 - Not done here: making spawn-intent global (drop `spawn-intent-apps`) — separate change.
 - Acceptance unchanged: cmd-tab/Dock-click/Spotlight to hidden-workspace apps switch workspaces;
   no wrong-workspace alt-l landings; no focus steals after alt-enter; no self-flips (WhatsApp).
@@ -78,12 +79,10 @@ Upstream #2173 (restore arrangement on monitor reconnect) and #57 (persist assig
 circling layout persistence. Our treeDump.swift is close to PR-able; restart command is
 fork-flavored and probably stays ours.
 
-### 4b. Fix `aerospace-state` for the fixed load-tree (after deploy; out of repo; REVIEW.md R-04)
-`~/git/config/aerospace/scripts/aerospace-state:283` calls `load-tree` without `--stdin` (the CLI
-then forwards no stdin), and the comment at `:285` ("load-tree leaves them be") is stale: floating
-windows are restored now. Its `restart()` (`:382-388`) still does `osascript quit; sleep 2; pkill;
-open -a AeroSpace` (the relauncher race + by-name gotcha): delegate to `aerospace restart`. Fix only
-once the fixed binary is deployed.
+### 4b. DONE 2026-10-04: `aerospace-state` uses the fixed load-tree (config 6a8abfb, R-04)
+`load-tree --stdin`; the stale re-float loop is gone (load-tree restores floating windows);
+`restart()` delegates to `aerospace restart`, with quit/pkill/open-by-bundle-path as fallback.
+Not exercised live yet: the next `aerospace-state restore|restart` is the first real run.
 
 ### 5. Punted config polish (from earlier sessions)
 - Service-mode additions: `b = ['balance-sizes', 'mode main']`, `e = ['enable toggle', 'mode main']`.

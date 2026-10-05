@@ -177,9 +177,9 @@ had one too until 2026-09-12).
 
 ### 6. Event-order focus guard (config: focus-steal-guard-apps, focus-grant-chords)
 `Sources/AppBundle/focusCache.swift: updateFocusCache` + `Sources/AppBundle/userInput.swift`
-(built 2026-09-12 on branch `event-order-guard`, now on `main`; deployed status: verify with
-`aerospace --version`. The pre-rebase build fork.14 = 850dfa1c contained it with a broken liveness
-probe, fixed on `main` 2026-10-04; supersedes the app-list-only guard below).
+(built 2026-09-12 on branch `event-order-guard`, now on `main`; deployed with all 2026-10-04 fixes
+as fork.15 = 9d0aabe9 on 2026-10-04 20:46. fork.14 = 850dfa1c had a broken liveness probe;
+supersedes the app-list-only guard below).
 
 **Problem.** macOS reports a native focus change onto a window on a *hidden* workspace both for
 things the user did (cmd-tab, Dock click, Spotlight/Raycast launch, a link clicked in another app, a
@@ -421,9 +421,9 @@ Gotchas (all learned in production):
   `[FORK gmjain/AeroSpace]`.
 - `aerospace/scripts/aerospace-state` — save/restore/restart/trees; meant to use native
   `dump-tree`/`load-tree` when the server has them, falls back to CGWindowList geometry inference
-  (guillotine-cut reconstruction) for vanilla AeroSpace. Today it always falls back: it calls
-  `load-tree` without `--stdin`, and its `restart()` uses `open -a` + `pkill` (REVIEW.md R-04,
-  tasks.md 4b; fix after the wave-2 deploy).
+  (guillotine-cut reconstruction) for vanilla AeroSpace. Since config 6a8abfb (2026-10-04, R-04)
+  it calls `load-tree --stdin` and `restart()` delegates to `aerospace restart` (quit/pkill/open by
+  bundle path only as a fallback).
 - `aerospace/smart-split/` — retired daemon (kept for vanilla; its `frames` subcommand still backs
   the inference fallback).
 - `aerospace/vanilla/` — frozen config + scripts + daemon for stock brew AeroSpace, with

@@ -210,3 +210,12 @@ mention "aerospace", all the unrelated word in application/openreview text, none
   an unlisted app.
 - Upstream PR candidates: the minimal FFM guard commit only; dump-tree/load-tree via #1958.
 - Three-finger swipe to workspaces (tasks.md task 7); service-mode additions.
+
+**2026-10-04 evening (`748d7538`): squash, CI, deploy**
+- Queue squashed to 12 feature commits (tree-identical; tag `backup/main-pre-squash-2026-10-04`).
+- GitHub `build` failed on periphery `--strict` (FfmRaise fields read only via synthesized
+  Equatable) and SwiftFormat drift; fixed in the owning feature commits; `./test.sh` is now the
+  documented CI gate (FORK.md gotchas).
+- Deployed fork.15 = 9d0aabe9 (20:46). fork.14 kept for rollback in
+  `~/.local/state/aerospace/rollback/fork.14-850dfa1c/`. Live: ws9 wrapper chain 12 -> 2.
+- Config 6a8abfb: `aerospace-state` uses `load-tree --stdin` and `aerospace restart` (R-04).

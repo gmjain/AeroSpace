@@ -8,11 +8,11 @@ Commit hashes cited in these docs predate the 2026-10-04 squash; they resolve vi
 - **Wave 1** (on `main` up to `272eefa5`): K-01..K-22 fixed, commits in the section 2 table.
   Through them the baseline regressions D9 (K-08) and F3 (K-16) and the open D4 (K-09) are
   resolved.
-- **Wave 2** (branch `integrate/wave2`, not deployed yet): R-01, -02, -03, -05, -06, -07, -08,
+- **Deployed** 2026-10-04 20:46 as fork.15 = 9d0aabe9 (waves 1–3). Live check: ws9 depth 12 -> 2.
+- **Wave 2** (branch `integrate/wave2`): R-01, -02, -03, -05, -06, -07, -08,
   -09 fixed. Hashes below are the pre-squash ones on `integrate/wave2`.
-- **Deferred**: R-04 (`~/git/config` `aerospace-state`: pass `--stdin`, restart via
-  `aerospace restart`), after the fixed binary is deployed. D1 and the script half of D5 stay
-  open with it.
+- **R-04 fixed** 2026-10-04 in the config repo (6a8abfb): `load-tree --stdin`, restart via
+  `aerospace restart`. D1 and the script half of D5 are fixed with it.
 - **Fixed in wave 2, not review items**: the wave-1 regression where a window opened by cmd-n
   in the placed window was pushed back (`0c4151be`), and the cmd-m residual: a minimized or
   hidden placed window releases the spawn guard (`36b13096`).
@@ -44,7 +44,7 @@ Commit hashes cited in these docs predate the 2026-10-04 squash; they resolve vi
 | R-01 | H | fixed (wave 2) | `49319944` |
 | R-02 | H | fixed (wave 2) | `32f18c70` |
 | R-03 | M | fixed (wave 2) | `3df61e76`, review fix `090c7b2e` |
-| R-04 | M | deferred: ~/git/config, after deploy | — |
+| R-04 | M | fixed (config repo) | 6a8abfb |
 | R-05 | L | fixed (wave 2) | `f3d2728a` |
 | R-06 | L | fixed (wave 2) | `8ead3b95` |
 | R-07 | L | fixed (wave 2) | `c68fe163` |
@@ -93,13 +93,13 @@ Status key: **fixed** · **fixed\*** (see note) · **regressed** · **open** · 
 | L6 | uncatchable ObjC write | fixed | `forkDebugLog.swift:40` |
 | L7 | handle never closed/reopened | fixed | K-19 `03e6a124` |
 | L8 | `DateFormatter` per line | fixed | `forkDebugLog.swift:13` |
-| D1 | `load-tree < f` got no stdin | open | CLI side done; script: R-04 (deferred) |
+| D1 | `load-tree < f` got no stdin | fixed | CLI side + script (R-04, config 6a8abfb) |
 | D2 | window-typed root killed server | fixed | `treeDump.swift:166,231` |
 | D3/D6 | floating, minimized handling | fixed | `treeDump.swift:172-176,250-258` |
 | D7/D8 | native state, MRU, fullscreen | fixed | workspace MRU: R-07 `c68fe163` |
 | D9 | per-ws orphan retile | fixed | resolved by K-08 `2f2a0c64` (+ `cc664792`) |
 | D4 | kill timer raced the answer | fixed | resolved by K-09 `573f2457` |
-| D5 | `open -a` by name | fixed\* | `RestartCommand.swift:61-65`; script: R-04 (deferred) |
+| D5 | `open -a` by name | fixed | `RestartCommand.swift:61-65`; script: R-04 (config 6a8abfb) |
 | D10 | 30 s poll, then no-op open | fixed | K-10 `a354fe49` |
 
 The one `TODO(review-2026-09-05)` (`RestartCommand.swift:35`) is D4; wave 1 removed it
