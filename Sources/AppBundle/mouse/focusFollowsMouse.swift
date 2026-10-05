@@ -61,13 +61,15 @@ func ffmShouldRaise(
             defer { timing?.logIfSlow() }
             // Ignores macOS menubar dropdown, but, unfortunately, it doesn't ignore non-native menu-like fake windows.
             // todo: It would be cool to somehow reuse isWindowHeuristic logic here
-            // Windows AeroSpace already tiles/floats cannot be native fullscreen (those live in the
-            // fullscreen container), so the AXFullScreen round trip is skipped for them.
+            // [FORK gmjain/AeroSpace] upstream's `isAxWindowUnderMouse(location) == false` check, extended
+            // to report whether the window under the cursor is native fullscreen (fork feature #9). Windows
+            // AeroSpace already tiles/floats cannot be native fullscreen (those live in the fullscreen
+            // container), so the AXFullScreen round trip is skipped for them.
             let ordinaryManaged = ordinaryManagedWindowIds()
             timing?.startPhase()
             let underMouse = await axWindowUnderMouse(location, ordinaryManaged: ordinaryManaged)
             timing?.endPhase(\.ax)
-            switch underMouse {
+            switch underMouse { // [FORK gmjain/AeroSpace] see above
                 case nil: break // the AX query itself failed: unknown, proceed (upstream behavior)
                 case .notAWindow: return
                 case .window(nativeFullscreen: let nativeFullscreen, pid: let pid, windowId: let windowId):
@@ -86,7 +88,9 @@ func ffmShouldRaise(
                     // windows (e.g. its non-fullscreen window on the other monitor) — those are visible
                     // on a normal Space, so FFM keeps working for them. Known gap: windows of *other*
                     // apps drawn over the fullscreen Space (Notification Center banners) still fall through.
-                    if let pid, ownsNativeFullscreenWindow(pid: pid), !isOrdinaryManagedWindow(windowId) { return }
+                    if let pid, ownsNativeFullscreenWindow(pid: pid), windowId.map(ordinaryManaged.contains) != true {
+                        return
+                    }
             }
             try checkCancellation()
             let workspace = location.monitorApproximation.activeWorkspace
@@ -163,25 +167,22 @@ func ffmShouldRaise(
     MacWindow.allWindows.contains { $0.app.pid == pid && $0.parent is MacosFullscreenWindowsContainer }
 }
 
-/// [FORK gmjain/AeroSpace] A window AeroSpace manages as a regular tiled/floating window, i.e. something
-/// living on a normal workspace — never a child popover of a native-fullscreen window.
-@MainActor private func isOrdinaryManagedWindow(_ windowId: CGWindowID?) -> Bool {
-    guard let windowId, let window = Window.get(byId: windowId) else { return false }
-    return window.parent is TilingContainer || window.parent is FloatingWindowsContainer
-}
-
-/// [FORK gmjain/AeroSpace] Ids of every window AeroSpace currently tiles or floats (any workspace).
+/// [FORK gmjain/AeroSpace] Ids of every window AeroSpace currently tiles or floats (any workspace), i.e.
+/// windows living on a normal workspace — never a child popover of a native-fullscreen window.
 @MainActor private func ordinaryManagedWindowIds() -> Set<CGWindowID> {
     Set(MacWindow.allWindows.lazy.filter { $0.parent is TilingContainer || $0.parent is FloatingWindowsContainer }.map(\.windowId))
 }
 
-private enum AxUnderMouse: Equatable {
+/// [FORK gmjain/AeroSpace] Result of axWindowUnderMouse (upstream's isAxWindowUnderMouse returned Bool?).
+private enum AxUnderMouse {
     case notAWindow
     /// nativeFullscreen: nil means the AXFullScreen read failed (the app did not answer).
     /// pid / windowId: nil when the respective lookup failed.
     case window(nativeFullscreen: Bool?, pid: pid_t?, windowId: CGWindowID?)
 }
 
+/// [FORK gmjain/AeroSpace] upstream's isAxWindowUnderMouse, renamed: also reports the window's pid,
+/// CGWindowID and AXFullScreen state (fork feature #9).
 /// nil means the AX query itself failed; callers treat that as "unknown, proceed" (upstream behavior).
 @concurrent
 private nonisolated func axWindowUnderMouse(_ location: CGPoint, ordinaryManaged: Set<CGWindowID>) async -> AxUnderMouse? {
@@ -202,9 +203,9 @@ private nonisolated func axWindowUnderMouse(_ location: CGPoint, ordinaryManaged
     return .window(nativeFullscreen: nativeFullscreen, pid: pidOrNil, windowId: windowId)
 }
 
-/// Three-state AXFullScreen read. `false` includes "attribute unsupported" (the window cannot be native
-/// fullscreen at all — utility panels, many non-AppKit windows); `nil` means the app did not answer
-/// (timeout / IPC failure), which callers must not mistake for "not fullscreen".
+/// [FORK gmjain/AeroSpace] Three-state AXFullScreen read. `false` includes "attribute unsupported" (the
+/// window cannot be native fullscreen at all — utility panels, many non-AppKit windows); `nil` means the
+/// app did not answer (timeout / IPC failure), which callers must not mistake for "not fullscreen".
 private nonisolated func readNativeFullscreen(_ window: AXUIElement) -> Bool? {
     var raw: AnyObject?
     return switch unsafe AXUIElementCopyAttributeValue(window, Ax.isFullscreenAttr.key as CFString, &raw) {
@@ -214,6 +215,7 @@ private nonisolated func readNativeFullscreen(_ window: AXUIElement) -> Bool? {
     }
 }
 
+// [FORK gmjain/AeroSpace] for FfmHoverTiming
 private extension Duration {
     /// Whole milliseconds, for log lines.
     var ms: Int64 { components.seconds * 1000 + components.attoseconds / 1_000_000_000_000_000 }
