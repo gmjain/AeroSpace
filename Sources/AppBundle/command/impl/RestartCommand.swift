@@ -74,23 +74,41 @@ struct RestartCommand: Command {
 ///    `open -a AeroSpace` let LaunchServices resolve the *name* to any registered
 ///    copy (it chose the xcode build-products bundle once, 2026-08-02), dropped
 ///    --config-path/--read-only, and debug builds aren't even named "AeroSpace".
-private func relauncherScript(oldPid: pid_t) -> String {
-    let serverArgs = Array(CommandLine.arguments.dropFirst())
+///    A failed relaunch leaves the user with no WM, so it is logged to
+///    restart-failed.log like the give-up above.
+func relauncherScript(
+    oldPid: pid_t,
+    serverArgs: [String] = Array(CommandLine.arguments.dropFirst()),
+    bundleUrl: URL = Bundle.main.bundleURL,
+    executablePath: String = Bundle.main.executablePath ?? CommandLine.arguments[0],
+) -> String {
     let quotedArgs = serverArgs.map(\.shellQuoted).joined(separator: " ")
-    let bundleUrl = Bundle.main.bundleURL
-    let launch = bundleUrl.pathExtension == "app"
-        ? "open \(bundleUrl.path.shellQuoted)" + (serverArgs.isEmpty ? "" : " --args " + quotedArgs)
+    let launch: String
+    if bundleUrl.pathExtension == "app" {
+        let open = "open \(bundleUrl.path.shellQuoted)" + (serverArgs.isEmpty ? "" : " --args " + quotedArgs)
+        // fail's message is one word: a double-quoted part (for $?) glued to the quoted path.
+        launch = "\(open) || fail \"relaunch failed: open exited with $? for \"\(bundleUrl.path.shellQuoted)"
+    } else {
         // Not a bundle (run-debug.sh runs the bare executable): exec the binary itself.
-        : "\((Bundle.main.executablePath ?? CommandLine.arguments[0]).shellQuoted) \(quotedArgs) >/dev/null 2>&1 &"
+        // Backgrounded, so only a missing/non-executable binary is detectable.
+        let exe = executablePath.shellQuoted
+        launch = """
+            [ -x \(exe) ] || fail "relaunch failed: not executable: "\(exe)
+            \(exe) \(quotedArgs) >/dev/null 2>&1 &
+            """
+    }
     let logDir = (restartFailedLogPath as NSString).deletingLastPathComponent
     return """
+        fail() {
+            mkdir -p \(logDir.shellQuoted)
+            echo "$(date '+%Y-%m-%d %H:%M:%S') restart: $1" >> \(restartFailedLogPath.shellQuoted)
+            exit 1
+        }
         i=0
         while kill -0 \(oldPid) 2>/dev/null; do
             i=$((i + 1))
             if [ "$i" -ge 3000 ]; then
-                mkdir -p \(logDir.shellQuoted)
-                echo "$(date '+%Y-%m-%d %H:%M:%S') restart: old instance (pid \(oldPid)) still alive after 10 min; giving up, not relaunching" >> \(restartFailedLogPath.shellQuoted)
-                exit 1
+                fail "old instance (pid \(oldPid)) still alive after 10 min; giving up, not relaunching"
             fi
             sleep 0.2
         done
