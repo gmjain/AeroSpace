@@ -38,8 +38,9 @@ focus within ~1 s of a deliberate action) and the 2 s proposal (its diff was del
 `git show 9675dd09`) were clock-based and are dropped. What landed instead (FORK.md §6):
 `pendingOwnFocus` (our own unanswered focus request) +
 `userInputToken` (mouse-down / release of a `focus-grant-chords` chord, spent by the first observed
-effect), six ordered rules in `updateFocusCache`, no clock anywhere; the app list is now the
-*strict* list. The decision gate from the old plan is answered (session events don't discriminate).
+effect), six ordered rules (+ 2b since wave 2) in `updateFocusCache`, no clock anywhere; the app
+list is now the *strict* list. The decision gate from the old plan is answered (session events
+don't discriminate).
 - Validate: `grep 'hidden-ws' ~/.local/state/aerospace/fork-debug.log` after a week — every
   `ACCEPTED … [user-input:…]` must be a real cmd-tab/click/launch, every `REJECTED … [no-input…]`
   a machine one. Watch for `token=none(spent-by:accept:…)` on a rejected cmd-tab (limitation 2 in
@@ -50,9 +51,11 @@ effect), six ordered rules in `updateFocusCache`, no clock anywhere; the app lis
 - Test delisting WezTerm (from `focus-steal-guard-apps`, then `spawn-intent-apps`) only after the
   fixed build is deployed and observed (user decision 2026-10-04; its premise is obsolete: alt-enter
   spawns through the mux, see docs/fork/HISTORY.md). Config untouched until then.
-- Spawn guard costs to watch (FORK.md §5): a same-app window opened without input (WezTerm cmd-n)
-  right after alt-enter is pushed back once; cmd-m on the placed window then a same-app re-key may
-  push back to the minimized window.
+- Wave 2 (2026-10-04, `integrate/wave2`, awaiting deploy) changes what the log shows: rejections
+  spend the token (`spent-by:reject:<rule>:…`), `[native-fullscreen; …]` accepts, `focused ws N
+  was on no monitor -> re-shown` lines, dated timestamps (split the week by day).
+- After the wave-2 deploy: `aerospace dump-tree` on ws9 should show Telegram under at most one
+  container (R-03 flattens the 12-level chain at the next normalization).
 - Not done here: making spawn-intent global (drop `spawn-intent-apps`) — separate change.
 - Acceptance unchanged: cmd-tab/Dock-click/Spotlight to hidden-workspace apps switch workspaces;
   no wrong-workspace alt-l landings; no focus steals after alt-enter; no self-flips (WhatsApp).
@@ -75,10 +78,12 @@ Upstream #2173 (restore arrangement on monitor reconnect) and #57 (persist assig
 circling layout persistence. Our treeDump.swift is close to PR-able; restart command is
 fork-flavored and probably stays ours.
 
-### 4b. Fix `aerospace-state` for the fixed load-tree (after deploy; out of repo)
+### 4b. Fix `aerospace-state` for the fixed load-tree (after deploy; out of repo; REVIEW.md R-04)
 `~/git/config/aerospace/scripts/aerospace-state:283` calls `load-tree` without `--stdin` (the CLI
 then forwards no stdin), and the comment at `:285` ("load-tree leaves them be") is stale: floating
-windows are restored now. Fix only once the fixed binary is deployed.
+windows are restored now. Its `restart()` (`:382-388`) still does `osascript quit; sleep 2; pkill;
+open -a AeroSpace` (the relauncher race + by-name gotcha): delegate to `aerospace restart`. Fix only
+once the fixed binary is deployed.
 
 ### 5. Punted config polish (from earlier sessions)
 - Service-mode additions: `b = ['balance-sizes', 'mode main']`, `e = ['enable toggle', 'mode main']`.

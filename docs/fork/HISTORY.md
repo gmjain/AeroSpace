@@ -124,6 +124,26 @@ mention "aerospace", all the unrelated word in application/openreview text, none
   state file, failed relaunch logged.
 - Tests 403 → 444. Known costs and leftovers: tasks.md task 1 and REVIEW.md R-items.
 
+**2026-10-04 fixes (wave 2, `748d7538`)**: `fix/focus-guard-w2` + `fix/autosplit-w2` +
+`docs/fork/REVIEW.md` merged on `integrate/wave2`, release build checked, not deployed.
+- Orchestrator decisions: R-05 pushes back to the focused workspace's most recent live window
+  (accept only if none; the m4 close-by-click case stays rejected). R-03 collapse is broad
+  (auto-split on + flatten off: any container whose only child is a container, root included).
+  R-04 (`aerospace-state`) deferred to after the deploy, out of repo.
+- Focus guard (FORK.md §5/§6): the focused workspace is never "hidden" and is re-shown after
+  wake (R-01; the log had 9 self push-backs on ws10); native-fullscreen windows are accepted on
+  hidden workspaces (R-02, swipe/ctrl-arrow); no push-back to or re-assert of a destroyed window
+  (R-05); rejections spend the token (R-06); CLI re-anchor counts only the command's own
+  `setFocus` calls via a TaskLocal (R-08). Spawn guard: ignores windows opened after arming
+  (fixes the wave-1 cmd-n regression), released when the placed window is minimized/hidden/
+  off-screen (new on-screen probe, used only there; "gone = destroyed" liveness unchanged).
+- Auto-split/dump/log: tagged wrappers flattened with flatten normalization off (R-03, live
+  chain 12 deep on ws9); workspace-level + floating MRU round-trip (R-07); dated log timestamps,
+  every monitor reassignment traced (R-09).
+- Integration review fix `090c7b2e`: with opposite-orientation normalization on, the R-03
+  collapse kept a level that normalization would otherwise flip (not layout-neutral before).
+- Tests 444 → 462. REVIEW.md statuses updated (K-* wave 1, R-* wave 2, R-04 deferred).
+
 ## Decisions (with why)
 
 - **Hard fork, linear `main`, deploy `main` only** (`c96e1609`): wants changes upstream refuses.
@@ -166,6 +186,7 @@ mention "aerospace", all the unrelated word in application/openreview text, none
 | 09-12 | stale WhatsApp report bounced a workspace switch | event-order guard |
 | 09-12 | Chrome-to-Chrome FFM lag | stale 19-day Chrome AX; update Chrome |
 | 10-04 | rule 5 dead, load-tree crash, spawn guard self-disarm | wave 1 on `main` |
+| 10-04 | ws10 sticky-invisible after wake; 12-deep wrapper chain | wave 2 (R-01, R-03) |
 
 ## Open threads
 
