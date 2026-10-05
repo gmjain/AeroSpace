@@ -175,10 +175,10 @@ extension WorkspaceDump {
     var prevRoots: [TilingContainer] = []
     for wsDump in dump.workspaces {
         let workspace = Workspace.get(byName: wsDump.name)
-        if let rootDump = wsDump.root {
-            // A Workspace may only hold containers; a window bound directly to
-            // it is an illegal child-parent relation (die). Skip such entries.
-            guard rootDump.type == "container" else { continue }
+        // A Workspace may only hold containers; a window bound directly to it is an
+        // illegal child-parent relation (die). Such a root is ignored (the current
+        // tree stays), but the workspace's floating/native-state lists still load.
+        if let rootDump = wsDump.root, rootDump.type == "container" {
             let prevRoot = workspace.rootTilingContainer
             orphans += prevRoot.allLeafWindowsRecursive.map { ($0, workspace) }
             prevRoots.append(prevRoot)
