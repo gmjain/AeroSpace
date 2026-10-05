@@ -12,6 +12,7 @@ struct SpawnIntent: Sendable, Equatable {
     let windowId: UInt32?
     let workspaceName: String
     let at: ContinuousClock.Instant // monotonic: immune to wall-clock jumps (NTP, sleep)
+    let userInputSeq: Int // userInputSeq at the keypress: later physical input supersedes the focus part
 }
 
 @MainActor private var _spawnIntent: SpawnIntent? = nil
@@ -25,7 +26,16 @@ struct SpawnIntent: Sendable, Equatable {
         windowId: focus.windowOrNil?.windowId,
         workspaceName: focus.workspace.name,
         at: .now,
+        userInputSeq: userInputSeq,
     )
+}
+
+/// Physical input (a click, a cmd-tab) arrived after the keypress that recorded `intent`: the user
+/// moved on (e.g. to another workspace during the 3-5 s `open -n` fallback). The window is still
+/// placed per the intent, but must not be force-focused or guarded — that yanked the user back.
+/// Event-ordered like the rest of the guard: no elapsed-time comparison.
+@MainActor func isSpawnIntentSupersededByInput(_ intent: SpawnIntent) -> Bool {
+    intent.userInputSeq != userInputSeq
 }
 
 /// Returns the pending intent if it is fresh and the app is configured, WITHOUT
@@ -50,6 +60,12 @@ struct SpawnIntent: Sendable, Equatable {
     guard _spawnIntent == intent else { return false }
     _spawnIntent = nil
     return true
+}
+
+/// Tests only: no pending intent, no guard.
+@MainActor func resetSpawnIntentState() {
+    _spawnIntent = nil
+    clearSpawnFocusGuard()
 }
 
 // ------------------------------------------------------- focus guard

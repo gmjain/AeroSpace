@@ -75,8 +75,12 @@ private let chordModifierMask: NSEvent.ModifierFlags = [.command, .control, .opt
 @MainActor private(set) var lastUserInputSpentBy: String? = nil
 /// A configured chord went down and its modifier has not been released yet.
 @MainActor private var armedChord: FocusGrantChord? = nil
+/// Counts every granted token (never reset), so a recorded event can tell whether physical input
+/// arrived after it — spawn-intent: the user moved on after the keypress, don't yank focus back.
+@MainActor private(set) var userInputSeq: Int = 0
 
 @MainActor func grantUserInputToken(_ kind: UserInputKind) {
+    userInputSeq += 1
     userInputToken = true // replaces any dangling token: tokens never accumulate
     lastUserInputKind = kind
     lastUserInputSpentBy = nil

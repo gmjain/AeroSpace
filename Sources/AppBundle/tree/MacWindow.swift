@@ -61,10 +61,19 @@ final class MacWindow: Window {
         // focus back to macOS (only runLightSession does), so without it a
         // window spawned while another app was frontmost would be "focused"
         // for AeroSpace while keystrokes kept going to that other app.
-        if placedByIntent {
-            _ = window.focusWindow()
-            window.nativeFocus()
-            armSpawnFocusGuard(windowId)
+        // Unless physical input arrived after the keypress (a click or cmd-tab
+        // elsewhere while the window was launching): then the user moved on,
+        // and the window stays where it was placed, unfocused and unguarded.
+        // Checked here, after every await above, right before focusing.
+        if placedByIntent, let intent {
+            if isSpawnIntentSupersededByInput(intent) {
+                forkDebugLog("spawnIntent: placed \(forkDebugDescribe(window)) per intent, NOT focused: user input "
+                    + "since the keypress [\(userInputStateForLog)] (session: \(refreshSessionEvent.map { "\($0)" } ?? "nil"))")
+            } else {
+                _ = window.focusWindow()
+                window.nativeFocus()
+                armSpawnFocusGuard(windowId)
+            }
         }
         return window
     }
