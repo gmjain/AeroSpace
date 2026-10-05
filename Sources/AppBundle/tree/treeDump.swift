@@ -27,6 +27,11 @@ struct WorkspaceDump: Codable, Sendable {
     var macosFullscreen: [NodeDump] = []
     /// Windows of apps that are macOS-hidden (ids only, no weights).
     var macosHidden: [NodeDump] = []
+    /// The workspace's own MRU order, most recent first: "tiling" | "floating" | "macosFullscreen" | "macosHidden".
+    /// Decides whether `workspace N` lands on the last-used tiled window or on a floating/native-state one.
+    var mru: [String]? = nil
+    /// Floating window ids, most recently used first (focus-follows-mouse hit-tests floating windows in it).
+    var floatingMru: [UInt32]? = nil
 }
 
 struct NodeDump: Codable, Sendable {
@@ -68,6 +73,8 @@ extension WorkspaceDump {
         floating = try c.decodeIfPresent([NodeDump].self, forKey: .floating) ?? []
         macosFullscreen = try c.decodeIfPresent([NodeDump].self, forKey: .macosFullscreen) ?? []
         macosHidden = try c.decodeIfPresent([NodeDump].self, forKey: .macosHidden) ?? []
+        mru = try c.decodeIfPresent([String].self, forKey: .mru)
+        floatingMru = try c.decodeIfPresent([UInt32].self, forKey: .floatingMru)
     }
 }
 
@@ -85,14 +92,21 @@ extension WorkspaceDump {
         ws.monitorTopLeftY = Double(monitor.rect.topLeftY)
         ws.visible = workspace.isVisible
         ws.focused = focus.workspace == workspace
+        // Read first: the workspace's container getters create a missing container, and creating binds it,
+        // which marks it as most recent. Below, only the root (always present) goes through a getter.
+        ws.mru = workspace.mruChildren.compactMap { workspaceChildMruKind($0) }
         ws.root = dumpNode(workspace.rootTilingContainer, isMru: false)
-        ws.floating = workspace.floatingWindows.map { dumpWindowNode($0, isMru: false) }
+        let floating = workspace.existingChild(FloatingWindowsContainer.self)
+        ws.floating = (floating?.children ?? []).filterIsInstance(of: Window.self)
+            .map { dumpWindowNode($0, isMru: false) }
+        let floatingMru = Array(floating?.mruChildren ?? MruStack()).filterIsInstance(of: Window.self).map(\.windowId)
+        ws.floatingMru = floatingMru.isEmpty ? nil : floatingMru
         // Like FrozenWorkspace.macosUnconventionalWindows: without these, a
         // natively fullscreen/hidden window gets re-detected on the startup
         // workspace after a restart and surfaces there when it leaves that state.
-        ws.macosFullscreen = workspace.macOsNativeFullscreenWindowsContainer.children
+        ws.macosFullscreen = (workspace.existingChild(MacosFullscreenWindowsContainer.self)?.children ?? [])
             .filterIsInstance(of: Window.self).map(dumpWindowIdNode)
-        ws.macosHidden = workspace.macOsNativeHiddenAppsWindowsContainer.children
+        ws.macosHidden = (workspace.existingChild(MacosHiddenAppsWindowsContainer.self)?.children ?? [])
             .filterIsInstance(of: Window.self).map(dumpWindowIdNode)
         dump.workspaces.append(ws)
     }
@@ -140,6 +154,22 @@ extension WorkspaceDump {
     dump.id = window.windowId
     dump.app = window.app.name
     return dump
+}
+
+private func workspaceChildMruKind(_ node: TreeNode) -> String? {
+    switch node {
+        case is TilingContainer: "tiling"
+        case is FloatingWindowsContainer: "floating"
+        case is MacosFullscreenWindowsContainer: "macosFullscreen"
+        case is MacosHiddenAppsWindowsContainer: "macosHidden"
+        default: nil
+    }
+}
+
+extension Workspace {
+    fileprivate func existingChild<T: TreeNode>(_ type: T.Type) -> T? {
+        children.lazy.compactMap { $0 as? T }.first
+    }
 }
 
 @MainActor private func weightOrNil(_ node: TreeNode) -> Double? {
@@ -193,6 +223,12 @@ extension WorkspaceDump {
             window.bindAsFloatingWindow(to: workspace)
             applyWindowFlags(window, floatingDump)
         }
+        // Binding made the last floating entry the most recent one; replay the dumped order.
+        if let floating = workspace.existingChild(FloatingWindowsContainer.self) {
+            for id in (wsDump.floatingMru ?? []).reversed() {
+                floating.children.first { ($0 as? Window)?.windowId == id }?.markAsMostRecentChild()
+            }
+        }
         for fsDump in wsDump.macosFullscreen {
             guard let window = unconventionalWindow(fsDump, live),
                   case .macosFullscreenWindowsContainer(let cur) = window.windowParentCases else { continue }
@@ -212,6 +248,17 @@ extension WorkspaceDump {
         try? await window.relayoutWindow(on: workspace, .nonCancellable, forceTile: true)
     }
     prevRoots.removeAll()
+    // Every bind above marked its container as most recent, so the workspace-level MRU is whatever was bound
+    // last (floating, then native fullscreen/hidden). Replay the dumped order over the non-empty containers;
+    // the most recent one is what `workspace N` focuses. Dumps without `mru` keep the bind order.
+    for wsDump in dump.workspaces {
+        let workspace = Workspace.get(byName: wsDump.name)
+        for kind in (wsDump.mru ?? []).reversed() {
+            guard let container = workspace.children.first(where: { workspaceChildMruKind($0) == kind }),
+                  !container.isEffectivelyEmpty else { continue }
+            container.markAsMostRecentChild()
+        }
+    }
 
     // 3) Visible workspaces (focused last), then the focused window.
     let visible = dump.workspaces.filter { $0.visible && !$0.focused } + dump.workspaces.filter(\.focused)

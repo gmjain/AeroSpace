@@ -127,6 +127,47 @@ final class TreeDumpTest: XCTestCase {
         assertTrue(wrapper.isAutoSplitWrapper)
     }
 
+    /// R-2026-10-04-07: the workspace-level MRU (tiling vs floating) and the floating windows' MRU order survive
+    /// a restart. Every bind marks its container as most recent, so without the dumped order the floating
+    /// container (bound after the root) won and `workspace N` focused a floating window.
+    func testWorkspaceAndFloatingMruSurviveRestart() async throws {
+        let startup = focus.workspace
+        let a = Workspace.get(byName: "a")
+        let tiled = TestWindow.new(id: 1, parent: a.rootTilingContainer)
+        TestWindow.new(id: 2, parent: a.floatingWindowsContainer)
+        let olderFloating = TestWindow.new(id: 3, parent: a.floatingWindowsContainer)
+        TestWindow.new(id: 4, parent: startup.rootTilingContainer)
+        _ = Window.get(byId: 4)?.focusWindow()
+        Window.get(byId: 2)?.markAsMostRecentChild() // floating MRU: 2, 3 (children order: 2, 3)
+        tiled.markAsMostRecentChild() // workspace MRU: tiling
+        assertEquals(olderFloating.parent?.mostRecentChild?.mruWindowId, 2)
+        let json = dumpTreeJson()
+
+        // New instance: every window is detected on the startup workspace first.
+        for id: UInt32 in [1, 2, 3] {
+            Window.get(byId: id)?.bind(to: startup.rootTilingContainer, adaptiveWeight: 1, index: INDEX_BIND_LAST)
+        }
+        await loadTree(try JSONDecoder().decode(TreeDump.self, from: Data(json.utf8)))
+        assertEquals(a.mostRecentWindowRecursive?.windowId, 1)
+        assertEquals(a.floatingWindows.map(\.windowId), [2, 3])
+        assertEquals(a.floatingWindowsContainer.mostRecentChild?.mruWindowId, 2)
+        assertEquals(dumpTreeJson(), json)
+    }
+
+    /// Dumps written before `mru`/`floatingMru` existed keep loading; their workspaces keep the bind order.
+    func testDumpWithoutWorkspaceMruLoads() async throws {
+        let a = Workspace.get(byName: "a")
+        TestWindow.new(id: 1, parent: focus.workspace.rootTilingContainer)
+        TestWindow.new(id: 2, parent: focus.workspace.rootTilingContainer)
+        var wsDump = WorkspaceDump(name: a.name)
+        wsDump.root = NodeDump(type: "container", children: [NodeDump(type: "window", id: 1)])
+        wsDump.floating = [NodeDump(type: "window", id: 2)]
+        let json = String(decoding: try JSONEncoder().encode(TreeDump(workspaces: [wsDump])), as: UTF8.self)
+        assertTrue(!json.contains("mru"))
+        await loadTree(try JSONDecoder().decode(TreeDump.self, from: Data(json.utf8)))
+        assertEquals(a.mostRecentWindowRecursive?.windowId, 2) // floating bound last
+    }
+
     /// The two-pass rebuild: a's old root holds window 1 that b's entry claims later in the same
     /// load; only the truly unclaimed window 2 is re-tiled onto a.
     func testWindowClaimedByLaterWorkspaceIsNotRetiled() async {
