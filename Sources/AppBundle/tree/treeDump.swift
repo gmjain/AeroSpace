@@ -149,6 +149,7 @@ extension WorkspaceDump {
 /// Rebuilds workspace trees from a dump. Missing windows are skipped; windows
 /// that exist but aren't mentioned get force-retiled onto their workspace.
 @MainActor func loadTree(_ dump: TreeDump) async {
+    let live = LiveWindows(dump)
     // 1) Workspace -> monitor. Every setActiveWorkspace makes the workspace
     // visible on its monitor; the correct visible set is restored in step 3.
     let monitors = sortedMonitorInfos
@@ -183,21 +184,21 @@ extension WorkspaceDump {
             orphans += prevRoot.allLeafWindowsRecursive.map { ($0, workspace) }
             prevRoots.append(prevRoot)
             prevRoot.unbindFromParent()
-            buildNode(rootDump, parent: workspace)
+            buildNode(rootDump, parent: workspace, live)
         }
         for floatingDump in wsDump.floating {
-            guard let window = rebindableWindow(floatingDump) else { continue }
+            guard let window = rebindableWindow(floatingDump, live) else { continue }
             window.bindAsFloatingWindow(to: workspace)
             applyWindowFlags(window, floatingDump)
         }
         for fsDump in wsDump.macosFullscreen {
-            guard let window = unconventionalWindow(fsDump),
+            guard let window = unconventionalWindow(fsDump, live),
                   case .macosFullscreenWindowsContainer(let cur) = window.windowParentCases else { continue }
             let target = workspace.macOsNativeFullscreenWindowsContainer
             if cur !== target { window.bind(to: target, adaptiveWeight: WEIGHT_DOESNT_MATTER, index: INDEX_BIND_LAST) }
         }
         for hiddenDump in wsDump.macosHidden {
-            guard let window = unconventionalWindow(hiddenDump),
+            guard let window = unconventionalWindow(hiddenDump, live),
                   case .macosHiddenAppsWindowsContainer(let cur) = window.windowParentCases else { continue }
             let target = workspace.macOsNativeHiddenAppsWindowsContainer
             if cur !== target { window.bind(to: target, adaptiveWeight: WEIGHT_DOESNT_MATTER, index: INDEX_BIND_LAST) }
@@ -215,12 +216,16 @@ extension WorkspaceDump {
     for wsDump in visible {
         _ = Workspace.get(byName: wsDump.name).focusWorkspace()
     }
-    if let wid = dump.focusedWindowId,
-       let window = liveWindow(dump.workspaces.lazy.flatMap(\.allWindowEntries).first { $0.id == wid }
-           ?? NodeDump(type: "window", id: wid))
+    // Looked up afresh: the leftover pass awaited, and a window may have closed meanwhile.
+    if let wid = dump.focusedWindowId, let window = Window.get(byId: wid),
+       dump.allWindowEntries.allSatisfy({ $0.id != wid || isSameApp($0, window) })
     {
         _ = window.focusWindow()
     }
+}
+
+extension TreeDump {
+    fileprivate var allWindowEntries: [NodeDump] { workspaces.flatMap(\.allWindowEntries) }
 }
 
 extension WorkspaceDump {
@@ -255,7 +260,7 @@ func dumpedMonitor(_ wsDump: WorkspaceDump, among sortedMonitors: [MonitorInfo])
 /// Binds the node described by `dump` under `parent`. Returns the bound node,
 /// or nil when the entry was skipped.
 @MainActor @discardableResult
-private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeNode? {
+private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject, _ live: LiveWindows) -> TreeNode? {
     switch dump.type {
         case "container":
             let orientation: Orientation = dump.orientation == "v" ? .v : .h
@@ -269,7 +274,7 @@ private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeN
             )
             var mruChild: TreeNode? = nil
             for childDump in dump.children ?? [] {
-                let child = buildNode(childDump, parent: container)
+                let child = buildNode(childDump, parent: container, live)
                 if childDump.mru == true, let child { mruChild = child }
             }
             // Bottom-up: every child has settled its own MRU by now. Marking
@@ -280,7 +285,7 @@ private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeN
             return container
         case "window":
             guard !(parent is Workspace) else { return nil } // see loadTree
-            guard let window = rebindableWindow(dump) else { return nil }
+            guard let window = rebindableWindow(dump, live) else { return nil }
             window.bind(
                 to: parent,
                 adaptiveWeight: dump.weight.map { CGFloat($0) } ?? WEIGHT_AUTO,
@@ -298,8 +303,8 @@ private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeN
 /// them: normalizeLayoutReason only moves windows whose native state
 /// *changes*, so rebinding one into tiling leaves a blank tile until the user
 /// restores it.
-@MainActor private func rebindableWindow(_ dump: NodeDump) -> Window? {
-    guard let window = liveWindow(dump) else { return nil }
+@MainActor private func rebindableWindow(_ dump: NodeDump, _ live: LiveWindows) -> Window? {
+    guard let window = live.get(dump) else { return nil }
     guard window.layoutReason == .standard else { return nil }
     return switch window.windowParentCases {
         case .tilingContainer, .floatingWindowsContainer, .unbound: window
@@ -311,19 +316,39 @@ private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeN
 /// The live window for a `macosFullscreen`/`macosHidden` entry, provided macOS
 /// still holds it in an unconventional state. A window that meanwhile returned
 /// to normal is left wherever it is now.
-@MainActor private func unconventionalWindow(_ dump: NodeDump) -> Window? {
-    guard let window = liveWindow(dump) else { return nil }
+@MainActor private func unconventionalWindow(_ dump: NodeDump, _ live: LiveWindows) -> Window? {
+    guard let window = live.get(dump) else { return nil }
     guard case .macos = window.layoutReason else { return nil }
     return window
 }
 
-/// The live window with the entry's id, unless that id now belongs to another app: macOS reuses
-/// window ids once windows close, so an older dump can name some other app's window. Entries
-/// without `app` (hand-written) match by id alone.
-@MainActor private func liveWindow(_ dump: NodeDump) -> Window? {
-    guard let id = dump.id, let window = Window.get(byId: id) else { return nil }
-    if let app = dump.app, let liveApp = window.app.name, app != liveApp { return nil }
-    return window
+/// The dump's windows, resolved before any tree is detached. Window.get(byId:) walks the
+/// workspace trees in unit tests, so a window inside an already-detached old root (e.g. one its
+/// own workspace is about to re-claim) would no longer resolve there; production looks ids up in
+/// MacWindow.allWindowsMap and is unaffected either way.
+private struct LiveWindows {
+    private let byId: [UInt32: Window]
+
+    @MainActor init(_ dump: TreeDump) {
+        var byId: [UInt32: Window] = [:]
+        for id in dump.allWindowEntries.compactMap(\.id) where byId[id] == nil {
+            byId[id] = Window.get(byId: id)
+        }
+        self.byId = byId
+    }
+
+    /// The live window with the entry's id, unless that id now belongs to another app.
+    @MainActor func get(_ dump: NodeDump) -> Window? {
+        guard let id = dump.id, let window = byId[id], isSameApp(dump, window) else { return nil }
+        return window
+    }
+}
+
+/// macOS reuses window ids once windows close, so an older dump can name some other app's
+/// window. Entries without `app` (hand-written) match by id alone.
+@MainActor private func isSameApp(_ dump: NodeDump, _ window: Window) -> Bool {
+    guard let app = dump.app, let liveApp = window.app.name else { return true }
+    return app == liveApp
 }
 
 @MainActor private func applyWindowFlags(_ window: Window, _ dump: NodeDump) {
