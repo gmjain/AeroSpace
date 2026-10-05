@@ -145,10 +145,15 @@ import Common // [FORK gmjain/AeroSpace]
 /// Returns true (accept) only when the focused workspace is empty and there is nothing to push
 /// back to: rejecting would leave the app frontmost with its window parked off-screen and
 /// keystrokes going nowhere visible (2026-09-05).
+/// Never pushes back to a window the window server destroyed (R-2026-10-04-05): see pushBackTarget.
 @MainActor private func rejectOrAcceptHiddenWsSteal(_ window: Window, reason: String) -> Bool {
-    guard let pushBackTo = focus.windowOrNil else {
+    guard let pushBackTo = pushBackTarget() else {
+        let why = focus.windowOrNil == nil
+            ? "focused ws \(focus.workspace.name) is empty"
+            : "focused \(forkDebugDescribe(focus.windowOrNil)) is gone from the window server and ws "
+                + "\(focus.workspace.name) has no other live window"
         forkDebugLog("updateFocusCache: ACCEPTED hidden-ws focus by \(forkDebugDescribe(window)) "
-            + "[\(reason); focused ws \(focus.workspace.name) is empty, nothing to push back to; "
+            + "[\(reason); \(why), nothing to push back to; "
             + "\(userInputStateForLog)] (session: \(sessionTag))")
         return true
     }
@@ -165,6 +170,31 @@ import Common // [FORK gmjain/AeroSpace]
         + "(session: \(sessionTag))")
     pushBackNativeFocus(from: window, to: pushBackTo)
     return false
+}
+
+/// [FORK gmjain/AeroSpace] Where rules 4/6 push macOS back to: the focused window, unless the window server
+/// already destroyed it. A click on the close button is followed by the app re-keying a hidden-ws window
+/// before garbageCollect (later in the session) moved AeroSpace's focus off the dead window; pushing back
+/// to it failed, rule 3 then re-asserted it, and macOS stayed on the hidden window (R-2026-10-04-05).
+/// Then: the focused workspace's most recent live window (what garbageCollect will focus), skipping
+/// native-fullscreen and hidden-app windows (a push-back must not switch Spaces or unhide an app).
+/// nil: nothing to push back to.
+@MainActor private func pushBackTarget() -> Window? {
+    guard let focused = focus.windowOrNil else { return nil }
+    if isWindowAliveInWindowServer(focused.windowId) { return focused }
+    return mostRecentLiveWindow(in: focus.workspace, excluding: focused.windowId)
+}
+
+@MainActor private func mostRecentLiveWindow(in node: TreeNode, excluding deadId: UInt32) -> Window? {
+    if let window = node as? Window {
+        return window.windowId != deadId && isWindowAliveInWindowServer(window.windowId) ? window : nil
+    }
+    if node is MacosFullscreenWindowsContainer || node is MacosHiddenAppsWindowsContainer { return nil }
+    let mru = Array(node.mruChildren)
+    for child in mru + node.children.reversed().filter({ !mru.contains($0) }) {
+        if let window = mostRecentLiveWindow(in: child, excluding: deadId) { return window }
+    }
+    return nil
 }
 
 /// [FORK gmjain/AeroSpace] The refresh session event, for fork-debug-log lines.

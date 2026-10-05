@@ -157,6 +157,7 @@ final class FocusStealGuardTest: XCTestCase {
     }
 
     func testEmptyFocusedWorkspaceAcceptsHiddenWs() {
+        updateFocusCache(nil) // the last known native focus survives tests: forget a previous test's window 2
         let hidden = TestWindow.new(id: 2, parent: Workspace.get(byName: "hidden").rootTilingContainer)
         assertEquals(focus.windowOrNil, nil)
         updateFocusCache(hidden) // rule 6 with nothing to push back to
@@ -165,6 +166,7 @@ final class FocusStealGuardTest: XCTestCase {
 
     func testCloseOfFocusedWindowSpendsTokenBeforeGarbageCollect() {
         let (visible, hidden) = arrange()
+        TestWindow.new(id: 3, parent: focus.workspace.rootTilingContainer) // a live window to push back to
         grantUserInputToken(.mouseDown(.leftMouseDown)) // the click that closed `visible`
         windowLivenessForTests = { $0 != visible.windowId } // window server already dropped it, GC not yet run
         updateFocusCache(hidden) // the app re-keys a hidden window: rule 6, the close spent the token
@@ -337,6 +339,38 @@ final class FocusStealGuardTest: XCTestCase {
         updateFocusCache(fs)
         assertEquals(focus.windowOrNil, fs)
         assertEquals(userInputToken, false)
+    }
+
+    /// R-2026-10-04-05: click close on the focused window, the app re-keys a hidden-ws window. Rule 6
+    /// rejects it, but the push-back went to the closed window (garbageCollect runs later in the
+    /// session), the raise failed, and macOS stayed on the hidden window. Push back to the focused
+    /// workspace's next live window instead: what garbageCollect will focus.
+    func testPushBackSkipsWindowTheWindowServerDestroyed() {
+        let (closed, hidden) = arrange()
+        let sibling = TestWindow.new(id: 3, parent: focus.workspace.rootTilingContainer)
+        sibling.markAsMostRecentChild()
+        closed.markAsMostRecentChild()
+        grantUserInputToken(.mouseDown(.leftMouseDown)) // the click on the close button
+        windowLivenessForTests = { $0 != closed.windowId }
+        TestApp.shared.focusedWindow = nil
+        updateFocusCache(hidden) // rule 6: the close spent the token
+        assertEquals(focus.windowOrNil, closed) // garbageCollect has not run yet
+        assertEquals(TestApp.shared.focusedWindow, sibling)
+        assertEquals(pendingOwnFocus?.windowId, sibling.windowId)
+    }
+
+    /// Rule 3 never re-asserts a pending own request whose window the window server destroyed: the report
+    /// falls through to rules 4-6, which push back to a live window. With no live window left on the
+    /// focused workspace there is nothing to push back to: accept, as for an empty workspace.
+    func testNoReassertOrPushBackToDestroyedWindow() {
+        let (closed, hidden) = arrange()
+        noteOwnFocusRequest(closed.windowId) // e.g. FFM raised it right before the close
+        windowLivenessForTests = { $0 != closed.windowId }
+        let seqBefore = ownFocusRequestSeq
+        updateFocusCache(hidden) // no token, no live window on the focused workspace
+        assertEquals(ownFocusRequestSeq, seqBefore) // no re-assert, no push-back to the dead window
+        assertEquals(focus.windowOrNil, hidden)
+        assertEquals(pendingOwnFocus, nil)
     }
 
     func testParseFocusGrantChords() {

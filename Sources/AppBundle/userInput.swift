@@ -158,10 +158,12 @@ let maxOwnFocusReasserts = 3
 
 /// Asks macOS again for the pending window after rejecting a report of `stolen`. Returns the window
 /// when the request was re-issued; nil when there is nothing to re-assert: no request, the budget is
-/// spent (the request stays, exhausted), or the window is gone (the request is cleared).
+/// spent (the request stays, exhausted), or the window is gone (the request is cleared). Gone includes
+/// destroyed in the window server but not garbage-collected yet (R-2026-10-04-05): the report is then
+/// the app re-keying after a close, not a stale answer to our request, and rules 4-6 judge it.
 @MainActor func reassertPendingOwnFocus(stolen: Window) -> Window? {
     guard let pending = pendingOwnFocus, !pending.isExhausted else { return nil }
-    guard let window = Window.get(byId: pending.windowId) else {
+    guard let window = Window.get(byId: pending.windowId), isWindowAliveInWindowServer(pending.windowId) else {
         pendingOwnFocus = nil
         return nil
     }
