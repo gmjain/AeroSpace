@@ -85,6 +85,7 @@ private func newConnection(_ connection: NWConnection) async { // todo add exit 
                 await answerToClient(exitCode: err.exitCode, stderr: err.msg)
                 continue
             case .cmd(let command):
+                var terminateAfterAnswer = false // [FORK gmjain/AeroSpace] restart
                 var answer: ServerAnswer =
                     await Result {
                         try await runLightSession(.socketServer(command.args), token) { () throws in
@@ -93,6 +94,7 @@ private func newConnection(_ connection: NWConnection) async { // todo add exit 
                                 workspaceName: request.workspace.flattenOptional(),
                             )
                             let cmdResult = await command.run(env, CmdStdin(request.stdin))
+                            terminateAfterAnswer = takePendingRestartTermination() // [FORK gmjain/AeroSpace]
                             return ServerAnswer(
                                 exitCode: cmdResult.exitCode.rawValue,
                                 stdout: cmdResult.stdout.joined(separator: "\n"),
@@ -112,6 +114,9 @@ private func newConnection(_ connection: NWConnection) async { // todo add exit 
                     answer.stderr += "\n\nAeroSpace client has sent incomplete JSON request. 'windowId' or/and 'workspace' fields are missing. Please forward your AEROSPACE_WINDOW_ID and AEROSPACE_WORKSPACE environment variables to these JSON fields. If the appropriate environment variables are empty, pass explicit 'null' in the JSON."
                 }
                 await answerToClient(answer)
+                // [FORK gmjain/AeroSpace] restart: terminate only once the CLI has its answer
+                // (even if the write failed: the relauncher is already waiting for this pid).
+                if terminateAfterAnswer { await terminateForRestart() }
                 continue
         }
     }

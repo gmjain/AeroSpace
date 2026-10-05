@@ -297,6 +297,8 @@ final class TreeDumpTest: XCTestCase {
         assertNotNil(parseCommand("load-tree foo").errorOrNil)
         testParseSingleCommandSucc("dump-tree", DumpTreeCmdArgs(rawArgs: []))
         assertNotNil(parseCommand("dump-tree --stdin").errorOrNil)
+        testParseSingleCommandSucc("restart", RestartCmdArgs(rawArgs: []))
+        testParseSingleCommandSucc("restart --no-restore", RestartCmdArgs(rawArgs: []).copy(\.noRestore, true))
     }
 
     func testDumpedMonitorMatching() {
