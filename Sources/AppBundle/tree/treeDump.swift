@@ -37,7 +37,7 @@ struct NodeDump: Codable, Sendable {
     var mru: Bool? = nil // true on the parent's most-recently-used child (accordion's expanded one)
     var children: [NodeDump]? = nil
     var id: UInt32? = nil // windows
-    var app: String? = nil // windows, informational only
+    var app: String? = nil // windows: load-tree skips the entry when the id now belongs to another app
     var fullscreen: Bool? = nil // windows: AeroSpace `fullscreen` state
     var noOuterGapsInFullscreen: Bool? = nil // windows: `fullscreen --no-outer-gaps`
 }
@@ -215,8 +215,23 @@ extension WorkspaceDump {
     for wsDump in visible {
         _ = Workspace.get(byName: wsDump.name).focusWorkspace()
     }
-    if let wid = dump.focusedWindowId, let window = Window.get(byId: wid) {
+    if let wid = dump.focusedWindowId,
+       let window = liveWindow(dump.workspaces.lazy.flatMap(\.allWindowEntries).first { $0.id == wid }
+           ?? NodeDump(type: "window", id: wid))
+    {
         _ = window.focusWindow()
+    }
+}
+
+extension WorkspaceDump {
+    fileprivate var allWindowEntries: [NodeDump] {
+        (root?.allWindowEntries ?? []) + floating + macosFullscreen + macosHidden
+    }
+}
+
+extension NodeDump {
+    fileprivate var allWindowEntries: [NodeDump] {
+        type == "window" ? [self] : (children ?? []).flatMap(\.allWindowEntries)
     }
 }
 
@@ -284,7 +299,7 @@ private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeN
 /// *changes*, so rebinding one into tiling leaves a blank tile until the user
 /// restores it.
 @MainActor private func rebindableWindow(_ dump: NodeDump) -> Window? {
-    guard let id = dump.id, let window = Window.get(byId: id) else { return nil }
+    guard let window = liveWindow(dump) else { return nil }
     guard window.layoutReason == .standard else { return nil }
     return switch window.windowParentCases {
         case .tilingContainer, .floatingWindowsContainer, .unbound: window
@@ -297,8 +312,17 @@ private func buildNode(_ dump: NodeDump, parent: NonLeafTreeNodeObject) -> TreeN
 /// still holds it in an unconventional state. A window that meanwhile returned
 /// to normal is left wherever it is now.
 @MainActor private func unconventionalWindow(_ dump: NodeDump) -> Window? {
-    guard let id = dump.id, let window = Window.get(byId: id) else { return nil }
+    guard let window = liveWindow(dump) else { return nil }
     guard case .macos = window.layoutReason else { return nil }
+    return window
+}
+
+/// The live window with the entry's id, unless that id now belongs to another app: macOS reuses
+/// window ids once windows close, so an older dump can name some other app's window. Entries
+/// without `app` (hand-written) match by id alone.
+@MainActor private func liveWindow(_ dump: NodeDump) -> Window? {
+    guard let id = dump.id, let window = Window.get(byId: id) else { return nil }
+    if let app = dump.app, let liveApp = window.app.name, app != liveApp { return nil }
     return window
 }
 
