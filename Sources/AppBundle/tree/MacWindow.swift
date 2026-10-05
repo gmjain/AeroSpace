@@ -89,6 +89,11 @@ final class MacWindow: Window {
             return
         }
         if !skipClosedWindowsCache { cacheClosedWindowIfNeeded() }
+        // [FORK gmjain/AeroSpace] closing the focused window is the effect of the click/hotkey that
+        // did it: spend the input token so the app's re-key afterwards is judged machine-caused.
+        if focus.windowOrNil == self || isNativeFocused(self) {
+            consumeUserInputToken(by: "close:\(app.name ?? app.rawAppBundleId ?? "?")")
+        }
         let parent = unbindFromParent().parent
         let deadWindowWorkspace = parent.nodeWorkspace
         let focus = focus
@@ -117,7 +122,7 @@ final class MacWindow: Window {
     override func isMacosFullscreen(_ cm: CancellationMode) async throws -> Bool { try await macApp.isMacosNativeFullscreen(windowId, cm) == true }
     override func isMacosMinimized(_ cm: CancellationMode) async throws -> Bool { try await macApp.isMacosNativeMinimized(windowId, cm) == true }
 
-    @MainActor override func nativeFocus() {
+    @MainActor override func nativeFocusImpl() { // [FORK gmjain/AeroSpace] was nativeFocus(), see Window
         macApp.nativeFocus(windowId)
     }
 

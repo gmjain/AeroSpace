@@ -55,8 +55,22 @@ func runHeavyCompleteRefreshSession(
     }
 }
 
+/// [FORK gmjain/AeroSpace] Own focus requests issued in this session (and in the heavy session it schedules,
+/// which inherits the TaskLocal) are ordered by the event that started it, not by the moment they go out after
+/// the session's awaits: a click or cmd-tab released in between supersedes them (userInput.swift).
 @MainActor
 func runLightSession<T>(
+    _ event: RefreshSessionEvent,
+    _ sessionGuard: RunSessionGuard,
+    body: @MainActor () async throws -> T,
+) async throws -> T {
+    try await $ownFocusCauseInputSeq.withValue(ownFocusCauseInputSeq ?? userInputSeq) {
+        try await runLightSessionImpl(event, sessionGuard, body: body)
+    }
+}
+
+@MainActor
+private func runLightSessionImpl<T>( // [FORK gmjain/AeroSpace] renamed, see runLightSession
     _ event: RefreshSessionEvent,
     _: RunSessionGuard,
     body: @MainActor () async throws -> T,

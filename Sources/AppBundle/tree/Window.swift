@@ -35,7 +35,15 @@ open class Window: TreeNode, Hashable {
     func isMacosFullscreen(_ cm: CancellationMode) async throws -> Bool { false }
     func isMacosMinimized(_ cm: CancellationMode) async throws -> Bool { false } // todo replace with enum MacOsWindowNativeState { normal, fullscreen, invisible }
     var isHiddenInCorner: Bool { die("Not implemented") }
-    @MainActor func nativeFocus() { die("Not implemented") }
+    // [FORK gmjain/AeroSpace] final: the single choke point where AeroSpace asks macOS to focus a window.
+    // It remembers the request until macOS reports it back (event-order focus guard, userInput.swift)
+    // and then runs the subclass's nativeFocusImpl, so test windows go through the same bookkeeping as
+    // MacWindow (a TestWindow override used to skip it, hiding that every push-back sets pendingOwnFocus).
+    @MainActor final func nativeFocus() {
+        if !serverArgs.isReadOnly { noteOwnFocusRequest(windowId) }
+        nativeFocusImpl()
+    }
+    @MainActor func nativeFocusImpl() { die("Not implemented") }
     func getAxRect(_ cm: CancellationMode) async throws -> Rect? { die("Not implemented") }
     func getCenter(_ cm: CancellationMode) async throws -> CGPoint? { try await getAxRect(cm)?.center }
 

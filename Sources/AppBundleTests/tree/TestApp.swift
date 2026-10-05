@@ -9,10 +9,13 @@ final class TestApp: AbstractApp {
     let bundlePath: String? = nil
     @MainActor
     static let shared = TestApp()
+    /// [FORK gmjain/AeroSpace] a second app, for focus-guard tests that need a different bundle id
+    @MainActor
+    static let other = TestApp(pid: 1, rawAppBundleId: "bobko.AeroSpace.test-app-other")
 
-    private init() {
-        self.pid = 0
-        self.rawAppBundleId = "bobko.AeroSpace.test-app"
+    private init(pid: Int32 = 0, rawAppBundleId: String = "bobko.AeroSpace.test-app") {
+        self.pid = pid
+        self.rawAppBundleId = rawAppBundleId
         self.name = rawAppBundleId
     }
 

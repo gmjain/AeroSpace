@@ -32,11 +32,22 @@ extension HotKey {
         hotkeys[binding.descriptionWithKeyCode] = HotKey(key: binding.keyCode, modifiers: binding.modifiers, keyDownHandler: {
             Task.startUnstructured {
                 if let activeMode {
+                    // [FORK gmjain/AeroSpace] a hotkey is the user acting: it supersedes whatever
+                    // AeroSpace asked macOS for before (and spends the input token, see below).
+                    clearPendingOwnFocus()
                     broadcastEvent(.bindingTriggered(
                         mode: activeMode,
                         binding: binding.descriptionWithKeyNotation,
                     ))
                     try await runLightSession(.hotkeyBinding, .checkServerIsEnabledOrDie()) { () throws in
+                        // [FORK gmjain/AeroSpace] the hotkey spends any pending input token (its effects
+                        // are AeroSpace's own, not a native focus change to honor) — only now, after this
+                        // session's updateFocusCache: the session cancels the in-flight heavy one, so a
+                        // cmd-tab whose activation that session was still awaiting is judged here first.
+                        // Spending before (cmd-tab to Slack@ws2, alt-j within AX lag) made rule 6 snap
+                        // the cmd-tab back. Only a token from before this session started: a cmd-tab released
+                        // during the session's AX round trip is the user's next act, not this hotkey's.
+                        consumeUserInputTokenForHotkey()
                         _ = await config.modes[activeMode]?.bindings[binding.descriptionWithKeyCode]?.commands
                             .run(.defaultEnv, .emptyStdin)
                     }

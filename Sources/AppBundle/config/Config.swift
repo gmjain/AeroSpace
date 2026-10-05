@@ -43,6 +43,14 @@ struct Config: ConvenienceMutable {
     var autoSplitByAspect: Bool = false
     // [FORK gmjain/AeroSpace] focus/workspace tracing to fork-debug.log
     var forkDebugLog: Bool = false
+    // [FORK gmjain/AeroSpace] the STRICT list of the event-order focus guard (rule 4 in
+    // updateFocusCache): a native focus change onto a hidden-workspace window of these apps is
+    // rejected and pushed back even with a user-input token (so cmd-tab to them snaps back). Unlisted
+    // apps are judged by input (rules 5/6); the list is meant to shrink as the logs validate those.
+    var focusStealGuardApps: [String] = []
+    // [FORK gmjain/AeroSpace] app-switching chords whose modifier RELEASE grants a user-input
+    // token to the event-order focus guard (see userInput.swift). Parsed manually after key-mapping.
+    var focusGrantChords: [FocusGrantChord] = FocusGrantChord.defaults
     var _nonEmptyWorkspacesRootContainersLayoutOnStartup: Void = ()
     var defaultRootContainerLayout: Layout = .tiles
     var defaultRootContainerOrientation: DefaultContainerOrientation = .auto
