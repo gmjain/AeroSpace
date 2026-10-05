@@ -26,8 +26,9 @@ import HotKey
 //     configured app-switching chord (`focus-grant-chords`: cmd-tab, cmd-shift-tab, cmd-backtick,
 //     cmd-space by default — the activation rides the modifier release). Plain typing, cmd-c/v/s,
 //     never grant one. A new input replaces the token; tokens never accumulate. Spent by the first
-//     effect: a hotkey binding firing, updateFocusCache accepting a native focus change or
-//     rejecting a hidden-workspace one (rules 3/4/6, the spawn guard; R-2026-10-04-06), or the
+//     effect: a hotkey binding firing (only a token granted before its session started),
+//     updateFocusCache accepting a native focus change or rejecting a hidden-workspace one (rules
+//     3/4/6, the spawn guard; R-2026-10-04-06), or the
 //     focused window being closed (the close was what the click/hotkey did; the app's re-key
 //     afterwards is machine-caused).
 //
@@ -101,6 +102,17 @@ private let chordModifierMask: NSEvent.ModifierFlags = [.command, .control, .opt
     userInputToken = false
     lastUserInputSpentBy = consumer
     return true
+}
+
+/// A hotkey binding spends the token only if it was granted no later than the event that started the
+/// hotkey's session (ownFocusCauseInputSeq, scoped by runLightSession). The spend runs after the session's
+/// first AX round trip: a cmd-tab released during it is newer input the hotkey never caused, and spending
+/// it made rule 6 (or rule 3, skipping the supersede) reject the cmd-tab's activation (FORK.md section 6).
+/// Returns whether a token was spent.
+@discardableResult
+@MainActor func consumeUserInputTokenForHotkey() -> Bool {
+    guard userInputSeq <= (ownFocusCauseInputSeq ?? userInputSeq) else { return false }
+    return consumeUserInputToken(by: "hotkey")
 }
 
 /// One-line token state for fork-debug-log lines.

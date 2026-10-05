@@ -155,6 +155,32 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(lastUserInputSpentBy?.hasPrefix("accept:"), true)
     }
 
+    /// The alt-1 hotkey session spends the input token only after its first AX round trip. A cmd-tab released
+    /// during that round trip is newer than the session's cause: the hotkey must leave its token alone, or rule 3
+    /// (token spent, nothing supersedes W1) rejects the cmd-tab's activation. A token from before the session
+    /// started is still the hotkey's to spend.
+    func testHotkeySpendsOnlyTokensUpToItsCause() {
+        let (visible, hidden) = arrange()
+        grantUserInputToken(.mouseDown(.leftMouseDown)) // a click before alt-1
+        let alt1Seq = userInputSeq // what runLightSession scopes for the alt-1 session
+        $ownFocusCauseInputSeq.withValue(alt1Seq) {
+            assertTrue(consumeUserInputTokenForHotkey()) // the click's token is the hotkey's
+        }
+        assertEquals(lastUserInputSpentBy, "hotkey")
+
+        let alt1SeqAgain = userInputSeq // alt-1 again: a new session
+        grantUserInputToken(.chord("cmd-tab")) // released during the session's getNativeFocusedWindow await
+        $ownFocusCauseInputSeq.withValue(alt1SeqAgain) {
+            assertEquals(consumeUserInputTokenForHotkey(), false) // the hotkey's spend, after updateFocusCache
+            noteOwnFocusRequest(visible.windowId) // the session's syncFocusToMacOs
+        }
+        assertEquals(userInputToken, true)
+        updateFocusCache(hidden) // the cmd-tab's activation: rule 3 yields, rule 5 accepts
+        assertEquals(focus.windowOrNil, hidden)
+        assertTrue(Workspace.get(byName: "hidden").isVisible)
+        assertEquals(lastUserInputSpentBy?.hasPrefix("accept:"), true)
+    }
+
     /// Input after the cause supersedes the request only while its token is unspent; a re-assert is the same
     /// request and keeps the original cause. (A token granted before the cause never supersedes the request,
     /// see testRejectionsSpendToken.)

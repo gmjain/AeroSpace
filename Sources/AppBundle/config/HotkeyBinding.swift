@@ -45,8 +45,9 @@ extension HotKey {
                         // session's updateFocusCache: the session cancels the in-flight heavy one, so a
                         // cmd-tab whose activation that session was still awaiting is judged here first.
                         // Spending before (cmd-tab to Slack@ws2, alt-j within AX lag) made rule 6 snap
-                        // the cmd-tab back.
-                        consumeUserInputToken(by: "hotkey")
+                        // the cmd-tab back. Only a token from before this session started: a cmd-tab released
+                        // during the session's AX round trip is the user's next act, not this hotkey's.
+                        consumeUserInputTokenForHotkey()
                         _ = await config.modes[activeMode]?.bindings[binding.descriptionWithKeyCode]?.commands
                             .run(.defaultEnv, .emptyStdin)
                         // [FORK gmjain/AeroSpace] the user's focus after a
