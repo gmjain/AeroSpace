@@ -283,6 +283,40 @@ final class FocusStealGuardTest: XCTestCase {
         assertEquals(focus.windowOrNil, visible)
     }
 
+    /// R-2026-10-04-01: after a display reconfiguration (wake, dock change) the focused workspace is shown
+    /// on no monitor. A report of another window on it was judged a hidden-ws steal and the user's click
+    /// undone. It is the focused workspace: accept, and the focus change re-shows it.
+    func testFocusedButInvisibleWorkspaceIsNotHidden() {
+        _ = arrange()
+        let sibling = TestWindow.new(id: 3, parent: focus.workspace.rootTilingContainer)
+        let focusedWs = focus.workspace
+        _ = mainMonitorInfo.setActiveWorkspace(Workspace.get(byName: "stub")) // display reconfiguration
+        assertEquals(focusedWs.isVisible, false)
+        assertEquals(focus.workspace, focusedWs)
+        updateFocusCache(nil) // locked screen
+        TestApp.shared.focusedWindow = nil
+        updateFocusCache(sibling) // no input
+        assertEquals(focus.windowOrNil, sibling)
+        assertEquals(TestApp.shared.focusedWindow, nil) // not pushed back
+        assertTrue(focusedWs.isVisible)
+    }
+
+    /// R-2026-10-04-01, same window: macOS reports the focused window itself after unlock. It used to be
+    /// pushed back to itself, then accepted by rule 1, and setFocus early-returned (same focus), so the
+    /// workspace stayed off-screen until a manual switch. Accepting it re-shows the workspace.
+    func testFocusedWindowOnInvisibleFocusedWorkspaceReShowsIt() {
+        let (visible, _) = arrange()
+        let focusedWs = focus.workspace
+        config.focusStealGuardApps = [TestApp.shared.rawAppBundleId!] // the logged case: Chrome, strict list
+        _ = mainMonitorInfo.setActiveWorkspace(Workspace.get(byName: "stub"))
+        updateFocusCache(nil)
+        let seqBefore = ownFocusRequestSeq
+        updateFocusCache(visible)
+        assertEquals(focus.windowOrNil, visible)
+        assertEquals(ownFocusRequestSeq, seqBefore) // never pushed back to the reported window
+        assertTrue(focusedWs.isVisible)
+    }
+
     func testParseFocusGrantChords() {
         let result = parseConfig(
             """

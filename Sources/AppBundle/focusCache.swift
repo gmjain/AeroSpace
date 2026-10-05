@@ -44,6 +44,14 @@ import Common // [FORK gmjain/AeroSpace]
                 + "(session: \(sessionTag))")
         }
         _ = nativeFocused?.focusWindow()
+        // [FORK gmjain/AeroSpace] R-2026-10-04-01: a display reconfiguration (wake, dock change) can
+        // leave the focused workspace on no monitor. setFocus early-returns when the focus itself did
+        // not change (macOS reports the focused window after unlock), so re-show it here.
+        if nativeFocused != nil, !focus.workspace.isVisible {
+            let shown = focus.workspace.workspaceMonitor.setActiveWorkspace(focus.workspace)
+            forkDebugLog("updateFocusCache: focused ws \(focus.workspace.name) was on no monitor -> re-shown "
+                + "(\(shown)) for \(forkDebugDescribe(nativeFocused)) (session: \(sessionTag))")
+        }
         lastKnownNativeFocusedWindowId = nativeFocused?.windowId
         nativeFocusObservationSeq += 1 // [FORK gmjain/AeroSpace]
     }
@@ -53,8 +61,9 @@ import Common // [FORK gmjain/AeroSpace]
 /// [FORK gmjain/AeroSpace] Decides whether a native focus change onto `window` (which differs from
 /// the last known native focus) becomes AeroSpace's focus. Ordered by events, never by time:
 ///   1. own-confirmed:     macOS reports the window AeroSpace last asked for -> accept.
-///   2. visible:           the window is on a visible workspace (or none) -> accept; a click/chord
-///                         token, if any, is spent by this acceptance.
+///   2. visible:           the window is on a visible workspace, on the focused one (shown on no
+///                         monitor after a display change, still not hidden), or on none -> accept; a
+///                         click/chord token, if any, is spent by this acceptance.
 ///   3. stale-own-pending: hidden workspace while our own request is still unanswered -> a stale or
 ///                         transient report; reject and re-assert the request (bounded).
 ///   4. strict-app:        hidden workspace, app in focus-steal-guard-apps -> reject, push back.
@@ -71,8 +80,10 @@ import Common // [FORK gmjain/AeroSpace]
         }
         return true
     }
-    // 2. visible
-    guard let targetWs = window.nodeWorkspace, !targetWs.isVisible else {
+    // 2. visible. The focused workspace is never "hidden" (R-2026-10-04-01): after wake or a display
+    // change it can be shown on no monitor, and judging its windows as steals pushed the user's click
+    // back (to the reported window itself when it was the focused one). updateFocusCache re-shows it.
+    guard let targetWs = window.nodeWorkspace, !targetWs.isVisible, targetWs != focus.workspace else {
         consumeUserInputToken(by: "accept:\(forkDebugDescribe(window))")
         return true
     }
