@@ -86,6 +86,7 @@ private func runLightSessionImpl<T>( // [FORK gmjain/AeroSpace] renamed, see run
         let focusBefore = focus.windowOrNil
 
         await refreshModel_nonCancellable()
+        let ownFocusSeqBefore = ownFocusRequestSeq // [FORK gmjain/AeroSpace]
         // [FORK gmjain/AeroSpace] spawn-intent: re-anchor after a CLI command that moved focus
         let result = try await runRecordingSpawnIntentIfCliMovedFocus(event, body: body)
         await refreshModel_nonCancellable()
@@ -95,7 +96,11 @@ private func runLightSessionImpl<T>( // [FORK gmjain/AeroSpace] renamed, see run
         updateTrayText()
         SecureInputPanel.shared.refresh()
         if !event.isFocusFollowsMouse { try await layoutWorkspaces() }
-        if focusBefore != focusAfter {
+        // [FORK gmjain/AeroSpace] Skip the sync raise when the body itself already asked macOS for
+        // exactly this window (focus-follows-mouse does): the second make-main + raise landed on the
+        // app's UI thread for nothing, and on a slow Chrome it doubled the AX flood (2026-09-12).
+        let bodyAlreadyAsked = ownFocusRequestSeq != ownFocusSeqBefore && pendingOwnFocus?.windowId == focusAfter?.windowId
+        if focusBefore != focusAfter, !bodyAlreadyAsked {
             focusAfter?.nativeFocus() // syncFocusToMacOs
         }
         if !event.isFocusFollowsMouse { scheduleCancellableCompleteRefreshSession(event) }

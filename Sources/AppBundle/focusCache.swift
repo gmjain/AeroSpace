@@ -9,6 +9,11 @@ import Common // [FORK gmjain/AeroSpace]
     lastKnownNativeFocusedWindowId == window.windowId
 }
 
+/// [FORK gmjain/AeroSpace] Bumped every time lastKnownNativeFocusedWindowId changes. Lets
+/// focus-follows-mouse raise once per distinct observation instead of on every mouse move. A counter,
+/// not the window id: the id returns to old values (A, desktop, A, desktop), the counter never does.
+@MainActor private(set) var nativeFocusObservationSeq: UInt64 = 0
+
 /// The data should flow (from nativeFocused to focused) and
 ///                      (from nativeFocused to lastKnownNativeFocusedWindowId)
 /// Alternative names: takeFocusFromMacOs, syncFocusFromMacOs
@@ -48,6 +53,7 @@ import Common // [FORK gmjain/AeroSpace]
                 + "(\(shown)) for \(forkDebugDescribe(nativeFocused)) (session: \(sessionTag))")
         }
         lastKnownNativeFocusedWindowId = nativeFocused?.windowId
+        nativeFocusObservationSeq += 1 // [FORK gmjain/AeroSpace]
     }
     (nativeFocused?.app as? MacApp)?.lastNativeFocusedWindowId = nativeFocused?.windowId // [FORK gmjain/AeroSpace]
 }

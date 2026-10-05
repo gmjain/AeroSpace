@@ -2,6 +2,39 @@ import AppKit
 
 @MainActor private var focusFollowsMouseMonitor: Any? = nil
 @MainActor private var focusFollowsTask: Task<(), any Error>? = nil
+/// [FORK gmjain/AeroSpace] The last window FFM raised and the native-focus observation it was raised
+/// under. FFM raises again only when a new observation arrives (macOS confirmed something else, e.g.
+/// Finder after a desktop click), never merely because macOS has not answered yet: re-raising on
+/// every mouse move while a slow app (Chrome under load) was still processing the first make-main +
+/// raise queued dozens of AX actions on its UI thread and made it slower still (2026-09-12).
+@MainActor private var ffmLastRaise: FfmRaise? = nil
+
+/// [FORK gmjain/AeroSpace] `observation` is nativeFocusObservationSeq, not the observed window id:
+/// the id can return to an old value (A focused, desktop click, A confirmed, desktop click again),
+/// and matching on it skipped the raise that should restore A, leaving keystrokes on Finder.
+struct FfmRaise {
+    let windowId: UInt32
+    let observation: UInt64
+}
+
+/// [FORK gmjain/AeroSpace] Whether FFM raises the window under the cursor. Always on an AeroSpace
+/// focus transition. Otherwise only when macOS disagrees (`nativeFocused` false: a desktop/gap click
+/// or a Dock click moved native focus away without AeroSpace adopting it) and this window has not
+/// already been raised under the current observation. Skipping when both agree keeps the app's own
+/// popups alive (the raise dismisses Chrome extension dropdowns; popups never update the cache).
+func ffmShouldRaise(
+    windowId: UInt32,
+    transition: Bool,
+    nativeFocused: Bool,
+    observation: UInt64,
+    lastRaise: FfmRaise?,
+) -> Bool {
+    if transition { return true }
+    if nativeFocused { return false }
+    // Fields compared explicitly (not via synthesized Equatable) so periphery sees them read.
+    guard let lastRaise else { return true }
+    return lastRaise.windowId != windowId || lastRaise.observation != observation
+}
 
 @MainActor func syncFocusFollowsMouse(_ config: Config) {
     if config.focusFollowsMouse.enabled == (focusFollowsMouseMonitor != nil) {
@@ -24,6 +57,10 @@ import AppKit
         focusFollowsTask = Task.startUnstructured { @MainActor in
             guard let token: RunSessionGuard = .isServerEnabled else { return }
             try checkCancellation()
+            // [FORK gmjain/AeroSpace] phase timing for fork-debug-log (only hovers slower than 25 ms).
+            // nil when logging is off: such a hover reads no clocks and builds no log strings.
+            let timing = config.forkDebugLog ? FfmHoverTiming() : nil
+            defer { timing?.logIfSlow() }
             // Ignores macOS menubar dropdown, but, unfortunately, it doesn't ignore non-native menu-like fake windows.
             // todo: It would be cool to somehow reuse isWindowHeuristic logic here
             // [FORK gmjain/AeroSpace] upstream's `isAxWindowUnderMouse(location) == false` check, extended
@@ -31,7 +68,9 @@ import AppKit
             // AeroSpace already tiles/floats cannot be native fullscreen (those live in the fullscreen
             // container), so the AXFullScreen round trip is skipped for them.
             let ordinaryManaged = ordinaryManagedWindowIds()
+            timing?.startPhase()
             let underMouse = await axWindowUnderMouse(location, ordinaryManaged: ordinaryManaged)
+            timing?.endPhase(\.ax)
             switch underMouse { // [FORK gmjain/AeroSpace] see above
                 case nil: break // the AX query itself failed: unknown, proceed (upstream behavior)
                 case .notAWindow: return
@@ -58,6 +97,7 @@ import AppKit
             try checkCancellation()
             let workspace = location.monitorApproximation.activeWorkspace
             var window: Window? = nil
+            timing?.startPhase() // [FORK gmjain/AeroSpace]
             for child in workspace.floatingWindowsContainer.mruChildren {
                 try checkCancellation()
                 guard let child = child as? Window else { continue }
@@ -67,15 +107,58 @@ import AppKit
                     break
                 }
             }
+            timing?.endPhase(\.rects) // [FORK gmjain/AeroSpace]
             if window == nil {
                 window = location.findWindowRecursively(in: workspace.rootTilingContainer, virtual: false, fullscreenCoversAll: true)
             }
-            if let window, window != focus.windowOrNil {
-                try await runLightSession(.focusFollowsMouse, token) {
-                    _ = window.focusWindow()
-                    window.nativeFocus()
+            // [FORK gmjain/AeroSpace] Skip the re-raise when AeroSpace AND macOS already agree that
+            // `window` is focused, or when it was already raised under the current observation.
+            if let window {
+                let transition = window != focus.windowOrNil
+                if ffmShouldRaise(
+                    windowId: window.windowId,
+                    transition: transition,
+                    nativeFocused: isNativeFocused(window),
+                    observation: nativeFocusObservationSeq,
+                    lastRaise: ffmLastRaise,
+                ) {
+                    if let timing {
+                        let kind = transition ? "raise-transition" : "raise-disagree"
+                        timing.outcome = "\(kind) -> \(forkDebugDescribe(window))"
+                    }
+                    timing?.startPhase()
+                    try await runLightSession(.focusFollowsMouse, token) {
+                        _ = window.focusWindow()
+                        window.nativeFocus()
+                    }
+                    timing?.endPhase(\.session)
+                    // Recorded after the session: its updateFocusCache may have refreshed the observation.
+                    ffmLastRaise = FfmRaise(windowId: window.windowId, observation: nativeFocusObservationSeq)
                 }
             }
+        }
+    }
+}
+
+/// [FORK gmjain/AeroSpace] Per-hover phase timing for fork-debug-log. FFM creates one only while logging
+/// is on, so the hover hot path stays free of it otherwise.
+@MainActor private final class FfmHoverTiming {
+    private let start = ContinuousClock.now
+    private var phaseStart = ContinuousClock.now
+    var ax: Duration = .zero, rects: Duration = .zero, session: Duration = .zero
+    var outcome = "skip"
+
+    func startPhase() { phaseStart = .now }
+    func endPhase(_ phase: ReferenceWritableKeyPath<FfmHoverTiming, Duration>) {
+        self[keyPath: phase] = .now - phaseStart
+    }
+
+    /// Only hovers slower than 25 ms are logged.
+    func logIfSlow() {
+        let total = ContinuousClock.now - start
+        if total > .milliseconds(25) {
+            forkDebugLog("ffm: \(outcome) total=\(total.ms)ms ax=\(ax.ms)ms rects=\(rects.ms)ms "
+                + "session=\(session.ms)ms")
         }
     }
 }
@@ -132,4 +215,10 @@ private nonisolated func readNativeFullscreen(_ window: AXUIElement) -> Bool? {
         case .attributeUnsupported, .noValue, .notImplemented: false
         default: nil
     }
+}
+
+// [FORK gmjain/AeroSpace] for FfmHoverTiming
+extension Duration {
+    /// Whole milliseconds, for log lines.
+    fileprivate var ms: Int64 { components.seconds * 1000 + components.attoseconds / 1_000_000_000_000_000 }
 }
