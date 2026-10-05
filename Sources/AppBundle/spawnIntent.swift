@@ -30,6 +30,21 @@ struct SpawnIntent: Sendable, Equatable {
     )
 }
 
+/// Called by runLightSession after its body. A CLI command that moved focus is as deliberate as a
+/// keybinding: hotkeys bound to exec-and-forget scripts that call `aerospace focus`/`workspace`
+/// record their intent before the script runs, so re-anchor here. Causal, never time-based: only
+/// when this very command changed the focused window or workspace.
+@MainActor func reRecordSpawnIntentIfCliMovedFocus(
+    _ event: RefreshSessionEvent,
+    _ focusBefore: Window?,
+    _ focusAfter: Window?,
+    workspaceNameBefore: String,
+) {
+    if case .socketServer = event, focusBefore != focusAfter || workspaceNameBefore != focus.workspace.name {
+        recordSpawnIntent()
+    }
+}
+
 /// Physical input (a click, a cmd-tab) arrived after the keypress that recorded `intent`: the user
 /// moved on (e.g. to another workspace during the 3-5 s `open -n` fallback). The window is still
 /// placed per the intent, but must not be force-focused or guarded — that yanked the user back.

@@ -89,14 +89,8 @@ func runLightSession<T>(
         if focusBefore != focusAfter, !bodyAlreadyAsked {
             focusAfter?.nativeFocus() // syncFocusToMacOs
         }
-        // [FORK gmjain/AeroSpace] spawn-intent: a CLI command that moved focus
-        // is as deliberate as a keybinding. Hotkeys bound to exec-and-forget
-        // scripts that call `aerospace focus`/`workspace` record their intent
-        // before the script runs, so re-anchor here. Causal, never time-based:
-        // only when this very command changed the focused window or workspace.
-        if case .socketServer = event, focusBefore != focusAfter || workspaceNameBefore != focus.workspace.name {
-            recordSpawnIntent()
-        }
+        // [FORK gmjain/AeroSpace] spawn-intent: re-anchor after a CLI command that moved focus
+        reRecordSpawnIntentIfCliMovedFocus(event, focusBefore, focusAfter, workspaceNameBefore: workspaceNameBefore)
         if !event.isFocusFollowsMouse { scheduleCancellableCompleteRefreshSession(event) }
         return result
     }

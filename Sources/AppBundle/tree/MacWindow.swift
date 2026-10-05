@@ -265,9 +265,9 @@ private func unbindAndGetBindingDataForNewWindow(_ windowId: UInt32, _ macApp: M
 }
 
 // The function is private because it's unsafe. It leaves the window in unbound state
-// [FORK gmjain/AeroSpace] `anchor` parameter (spawn-intent)
+// [FORK gmjain/AeroSpace] `anchor` parameter (spawn-intent); internal, not private, for SpawnIntentTest
 @MainActor
-private func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: Window?, anchor: Window? = nil) -> BindingData {
+func unbindAndGetBindingDataForNewTilingWindow(_ workspace: Workspace, window: Window?, anchor: Window? = nil) -> BindingData {
     window?.unbindFromParent() // It's important to unbind to get correct data from below
     // [FORK gmjain/AeroSpace] spawn-intent anchor beats the MRU window when
     // it is a live tiling window on this workspace.
