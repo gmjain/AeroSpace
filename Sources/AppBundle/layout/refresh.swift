@@ -70,11 +70,11 @@ func runLightSession<T>(
         if let nativeFocused { try await debugWindowsIfRecording(nativeFocused, .cancellable) }
         updateFocusCache(nativeFocused)
         let focusBefore = focus.windowOrNil
-        let workspaceNameBefore = focus.workspace.name // [FORK gmjain/AeroSpace]
 
         await refreshModel_nonCancellable()
         let ownFocusSeqBefore = ownFocusRequestSeq // [FORK gmjain/AeroSpace]
-        let result = try await body()
+        // [FORK gmjain/AeroSpace] spawn-intent: re-anchor after a CLI command that moved focus
+        let result = try await runRecordingSpawnIntentIfCliMovedFocus(event, body: body)
         await refreshModel_nonCancellable()
 
         let focusAfter = focus.windowOrNil
@@ -89,8 +89,6 @@ func runLightSession<T>(
         if focusBefore != focusAfter, !bodyAlreadyAsked {
             focusAfter?.nativeFocus() // syncFocusToMacOs
         }
-        // [FORK gmjain/AeroSpace] spawn-intent: re-anchor after a CLI command that moved focus
-        reRecordSpawnIntentIfCliMovedFocus(event, focusBefore, focusAfter, workspaceNameBefore: workspaceNameBefore)
         if !event.isFocusFollowsMouse { scheduleCancellableCompleteRefreshSession(event) }
         return result
     }

@@ -96,24 +96,28 @@ final class SpawnIntentTest: XCTestCase {
 
     /// `alt-h` -> exec-and-forget script -> `aerospace focus`: the hotkey recorded its intent before
     /// the script moved focus. The CLI session re-anchors, but only when that command moved focus.
-    func testSocketServerSessionReAnchorsOnlyWhenItMovedFocus() {
+    func testSocketServerSessionReAnchorsOnlyWhenItsCommandMovedFocus() async throws {
         let a = TestWindow.new(id: 1, parent: focus.workspace.rootTilingContainer)
         let b = TestWindow.new(id: 2, parent: focus.workspace.rootTilingContainer)
+        let c = TestWindow.new(id: 3, parent: focus.workspace.rootTilingContainer)
         _ = a.focusWindow()
         recordSpawnIntent()
         let first = peekSpawnIntent(for: TestApp.shared)!
         let cli = RefreshSessionEvent.socketServer(ModeCmdArgs(rawArgs: []))
-        reRecordSpawnIntentIfCliMovedFocus(cli, a, a, workspaceNameBefore: focus.workspace.name) // e.g. list-windows
+        try await runRecordingSpawnIntentIfCliMovedFocus(cli) {} // e.g. list-windows
         assertEquals(peekSpawnIntent(for: TestApp.shared), first)
-        _ = b.focusWindow()
-        reRecordSpawnIntentIfCliMovedFocus(.hotkeyBinding, a, b, workspaceNameBefore: focus.workspace.name)
+        // R-2026-10-04-08: a query straddling an FFM hover. The hover's session is another task.
+        try await runRecordingSpawnIntentIfCliMovedFocus(cli) {
+            await Task.detached { @MainActor in _ = b.focusWindow() }.value
+        }
+        assertEquals(focus.windowOrNil, b)
+        assertEquals(peekSpawnIntent(for: TestApp.shared), first) // not re-anchored to the hovered window
+        try await runRecordingSpawnIntentIfCliMovedFocus(.hotkeyBinding) { _ = c.focusWindow() }
         assertEquals(peekSpawnIntent(for: TestApp.shared), first) // hotkeys record their own intent
-        reRecordSpawnIntentIfCliMovedFocus(cli, a, b, workspaceNameBefore: focus.workspace.name)
-        assertEquals(peekSpawnIntent(for: TestApp.shared)?.windowId, b.windowId)
+        try await runRecordingSpawnIntentIfCliMovedFocus(cli) { _ = a.focusWindow() } // `aerospace focus`
+        assertEquals(peekSpawnIntent(for: TestApp.shared)?.windowId, a.windowId)
         // `aerospace workspace other` onto an empty workspace: no focused window before or after.
-        let wsBefore = focus.workspace.name
-        _ = Workspace.get(byName: "other").focusWorkspace()
-        reRecordSpawnIntentIfCliMovedFocus(cli, nil, nil, workspaceNameBefore: wsBefore)
+        try await runRecordingSpawnIntentIfCliMovedFocus(cli) { _ = Workspace.get(byName: "other").focusWorkspace() }
         assertEquals(peekSpawnIntent(for: TestApp.shared)?.workspaceName, "other")
         assertEquals(peekSpawnIntent(for: TestApp.shared)?.windowId, nil)
     }

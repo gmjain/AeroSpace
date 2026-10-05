@@ -30,19 +30,36 @@ struct SpawnIntent: Sendable, Equatable {
     )
 }
 
-/// Called by runLightSession after its body. A CLI command that moved focus is as deliberate as a
-/// keybinding: hotkeys bound to exec-and-forget scripts that call `aerospace focus`/`workspace`
-/// record their intent before the script runs, so re-anchor here. Causal, never time-based: only
-/// when this very command changed the focused window or workspace.
-@MainActor func reRecordSpawnIntentIfCliMovedFocus(
+/// Focus changes (setFocus calls that changed the focus) made by the CLI command whose body runs in the
+/// current task. MainActor-isolated, hence Sendable.
+@MainActor final class CommandFocusChanges {
+    var count = 0
+}
+
+@TaskLocal private var commandFocusChanges: CommandFocusChanges? = nil
+
+/// Called by setFocus whenever it changed the focus.
+@MainActor func noteFocusChangeForSpawnIntent() {
+    commandFocusChanges?.count += 1
+}
+
+/// runLightSession runs its body through this. A CLI command that moved focus is as deliberate as a
+/// keybinding: hotkeys bound to exec-and-forget scripts that call `aerospace focus`/`workspace` record
+/// their intent before the script runs, so re-anchor after the command. Causal, never time-based: only
+/// focus changes made in this command's own task count (TaskLocal). Light sessions are not serialized,
+/// so comparing the focus before and after the session also caught an FFM/AX session interleaved at
+/// one of its awaits: `aerospace list-windows --focused` from the workspace-change hook straddling an
+/// FFM hover re-anchored the intent to the hovered window (R-2026-10-04-08). Re-recorded right after
+/// the body, before the session's next await, so the anchor is the focus the command left.
+@MainActor func runRecordingSpawnIntentIfCliMovedFocus<T>(
     _ event: RefreshSessionEvent,
-    _ focusBefore: Window?,
-    _ focusAfter: Window?,
-    workspaceNameBefore: String,
-) {
-    if case .socketServer = event, focusBefore != focusAfter || workspaceNameBefore != focus.workspace.name {
-        recordSpawnIntent()
-    }
+    body: @MainActor () async throws -> T,
+) async throws -> T {
+    guard case .socketServer = event else { return try await body() }
+    let changes = CommandFocusChanges()
+    let result = try await $commandFocusChanges.withValue(changes) { try await body() }
+    if changes.count > 0 { recordSpawnIntent() }
+    return result
 }
 
 /// Physical input (a click, a cmd-tab) arrived after the keypress that recorded `intent`: the user

@@ -69,6 +69,7 @@ private struct FrozenFocus: AeroAny, Equatable, Sendable {
     }
 
     _focus = newFocus.frozen
+    noteFocusChangeForSpawnIntent() // [FORK gmjain/AeroSpace] spawn-intent: CLI re-anchor (spawnIntent.swift)
     let status = newFocus.workspace.workspaceMonitor.setActiveWorkspace(newFocus.workspace)
 
     newFocus.windowOrNil?.markAsMostRecentChild()
